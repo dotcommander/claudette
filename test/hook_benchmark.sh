@@ -245,8 +245,9 @@ if [[ "$count_false_neg" -eq 0 ]]; then
   echo "  (none)"
 else
   tail -n +2 "$TSV_OUT" | while IFS=$'\t' read -r prompt _ _ _ _ _ expected verdict; do
-    [[ "$verdict" == "FALSE_NEGATIVE" ]] && \
+    if [[ "$verdict" == "FALSE_NEGATIVE" ]]; then
       printf "  expected=%-40s  prompt: %s\n" "$expected" "${prompt:0:60}"
+    fi
   done
 fi
 echo ""
@@ -257,8 +258,9 @@ if [[ "$count_expected_missing" -eq 0 ]]; then
   echo "  (none)"
 else
   tail -n +2 "$TSV_OUT" | while IFS=$'\t' read -r prompt _ top_entry _ _ _ expected verdict; do
-    [[ "$verdict" == "EXPECTED_MISSING" ]] && \
+    if [[ "$verdict" == "EXPECTED_MISSING" ]]; then
       printf "  expected=%-30s  got=%-30s  prompt: %s\n" "$expected" "$top_entry" "${prompt:0:40}"
+    fi
   done
 fi
 echo ""
@@ -269,8 +271,9 @@ if [[ "$count_false_pos" -eq 0 ]]; then
   echo "  (none)"
 else
   tail -n +2 "$TSV_OUT" | while IFS=$'\t' read -r prompt _ top_entry _ _ _ _ verdict; do
-    [[ "$verdict" == "FALSE_POSITIVE" ]] && \
+    if [[ "$verdict" == "FALSE_POSITIVE" ]]; then
       printf "  matched=%-30s  prompt: %s\n" "$top_entry" "${prompt:0:60}"
+    fi
   done
 fi
 echo ""
@@ -282,8 +285,9 @@ declare -A cat_matched=()
 for i in "${!PROMPTS[@]}"; do
   cat="${CATEGORIES[$i]}"
   cat_total["$cat"]=$(( ${cat_total["$cat"]:-0} + 1 ))
-  [[ "${R_STATUS[$i]}" == "matched" ]] && \
+  if [[ "${R_STATUS[$i]}" == "matched" ]]; then
     cat_matched["$cat"]=$(( ${cat_matched["$cat"]:-0} + 1 ))
+  fi
 done
 for cat in $(printf '%s\n' "${!cat_total[@]}" | sort); do
   printf "  %-15s  %2d/%2d matched\n" "$cat" "${cat_matched[$cat]:-0}" "${cat_total[$cat]}"
