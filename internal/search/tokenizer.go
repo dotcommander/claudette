@@ -45,6 +45,10 @@ func DefaultStopWords() StopSet {
 			"don", "going", "gonna", "never", "often", "other",
 			"really", "something", "still", "stuff", "thing", "things",
 			"think", "those", "under", "while",
+			// Conversational — suppress chat noise from reaching scorer.
+			"awesome", "cool", "done", "fine", "lgtm", "nice",
+			"ok", "okay", "perfect", "please", "right", "sounds",
+			"thanks", "yep",
 		}
 		defaultStops = make(StopSet, len(words))
 		for _, w := range words {
