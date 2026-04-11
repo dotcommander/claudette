@@ -184,7 +184,7 @@ func relPath(e index.Entry) string {
 	return e.FilePath
 }
 
-// PostToolResultInput matches Claude Code's PostToolResult hook stdin JSON.
+// PostToolResultInput matches Claude Code's PostToolUse hook stdin JSON.
 type PostToolResultInput struct {
 	ToolName   string `json:"tool_name"`
 	ToolInput  any    `json:"tool_input"`
@@ -192,8 +192,8 @@ type PostToolResultInput struct {
 }
 
 // RunPostToolResult reads PostToolResultInput from stdin, checks for error signals,
-// and surfaces relevant KB entries when the tool result indicates a failure.
-// Successful tool results produce no output, preserving hook performance.
+// and surfaces relevant KB entries when the tool output indicates a failure.
+// Successful tool outputs produce no output, preserving hook performance.
 func RunPostToolResult() error {
 	var status string
 	defer logStatus("claudette post-tool-result", &status, time.Now())()
@@ -258,7 +258,7 @@ func RunPostToolResult() error {
 
 	resp := HookResponse{
 		HookSpecificOutput: &HookSpecificOutput{
-			HookEventName:     "PostToolResult",
+			HookEventName:     "PostToolUse",
 			AdditionalContext: formatContext(results, outputMode()),
 		},
 	}

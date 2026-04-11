@@ -167,7 +167,7 @@ func initCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
 		Short: "Wire hooks into Claude Code and build the initial index",
-		Long:  "Registers claudette as a UserPromptSubmit and PostToolResult hook in ~/.claude/settings.json, writes default config, and runs the first scan. Safe to re-run — idempotent.",
+		Long:  "Registers claudette as a UserPromptSubmit and PostToolUse hook in ~/.claude/settings.json, writes default config, and runs the first scan. Safe to re-run — idempotent.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInit()
 		},
@@ -192,8 +192,17 @@ func runInit() error {
 	hookCmd := binPath + " hook"
 	postCmd := binPath + " post-tool-result"
 
-	wired1 := index.UpsertHookEntry(settings, "UserPromptSubmit", hookCmd, "claudette")
-	wired2 := index.UpsertHookEntry(settings, "PostToolResult", postCmd, "claudette")
+	// Clean up invalid hook event from older claudette versions.
+	index.RemoveInvalidHookEvents(settings)
+
+	wired1, err := index.UpsertHookEntry(settings, "UserPromptSubmit", hookCmd, "claudette")
+	if err != nil {
+		return fmt.Errorf("wiring UserPromptSubmit hook: %w", err)
+	}
+	wired2, err := index.UpsertHookEntry(settings, "PostToolUse", postCmd, "claudette")
+	if err != nil {
+		return fmt.Errorf("wiring PostToolUse hook: %w", err)
+	}
 
 	if wired1 || wired2 {
 		if err := index.WriteClaudeSettings(settings); err != nil {
@@ -203,7 +212,7 @@ func runInit() error {
 			fmt.Fprintf(os.Stdout, "Wired UserPromptSubmit hook -> %s\n", hookCmd)
 		}
 		if wired2 {
-			fmt.Fprintf(os.Stdout, "Wired PostToolResult hook -> %s\n", postCmd)
+			fmt.Fprintf(os.Stdout, "Wired PostToolUse hook -> %s\n", postCmd)
 		}
 	} else {
 		fmt.Fprintln(os.Stdout, "Hooks already wired.")

@@ -12,6 +12,16 @@ import (
 // hookTimeoutMs is the timeout (in milliseconds) written into Claude Code hook entries.
 const hookTimeoutMs = 3000
 
+// validHookEvents is the set of hook event names recognised by Claude Code.
+var validHookEvents = map[string]struct{}{
+	"PreToolUse":       {},
+	"PostToolUse":      {},
+	"UserPromptSubmit": {},
+	"Stop":             {},
+	"Notification":     {},
+	"SubagentStop":     {},
+}
+
 // ClaudeSettingsPath returns the path to Claude Code's settings.json.
 func ClaudeSettingsPath() (string, error) {
 	home, err := os.UserHomeDir()
@@ -62,7 +72,12 @@ func WriteClaudeSettings(settings map[string]any) error {
 // UpsertHookEntry ensures a hook command is registered for the given event.
 // If any existing hook command contains the identifier substring, the event
 // is skipped (idempotent). Returns true if a new hook was wired.
-func UpsertHookEntry(settings map[string]any, event, command string, identifier string) bool {
+// Returns an error if the event name is not a valid Claude Code hook event.
+func UpsertHookEntry(settings map[string]any, event, command string, identifier string) (bool, error) {
+	if _, ok := validHookEvents[event]; !ok {
+		return false, fmt.Errorf("invalid hook event %q: valid events are PreToolUse, PostToolUse, UserPromptSubmit, Stop, Notification, SubagentStop", event)
+	}
+
 	hooksMap, ok := settings["hooks"].(map[string]any)
 	if !ok {
 		hooksMap = make(map[string]any)
@@ -90,7 +105,7 @@ func UpsertHookEntry(settings map[string]any, event, command string, identifier 
 				continue
 			}
 			if cmd, _ := entry["command"].(string); strings.Contains(cmd, identifier) {
-				return false
+				return false, nil
 			}
 		}
 	}
@@ -107,5 +122,20 @@ func UpsertHookEntry(settings map[string]any, event, command string, identifier 
 		},
 	}
 	hooksMap[event] = append(groups, newGroup)
-	return true
+	return true, nil
+}
+
+// RemoveInvalidHookEvents removes any hook event keys from settings that are
+// not recognised by Claude Code. This cleans up damage from older claudette
+// versions that wrote "PostToolResult" (invalid) instead of "PostToolUse".
+func RemoveInvalidHookEvents(settings map[string]any) {
+	hooksMap, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		return
+	}
+	for key := range hooksMap {
+		if _, valid := validHookEvents[key]; !valid {
+			delete(hooksMap, key)
+		}
+	}
 }
