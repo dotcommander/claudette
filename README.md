@@ -3,90 +3,87 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/dotcommander/claudette.svg)](https://pkg.go.dev/github.com/dotcommander/claudette)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Lightweight CLI that surfaces relevant knowledge base entries, skills, agents, and commands for [Claude Code](https://claude.ai/code).
+You've spent hours building a knowledge base of hard-won debugging insights, custom skills, and specialized agents. But Claude Code doesn't know they exist unless you remember to mention them — so you keep re-discovering the same race condition fix, re-explaining the same API quirk, losing context you already captured.
 
-Claudette indexes your `~/.claude/` components (KB articles, skills, agents, commands) and scores them against natural language prompts using keyword overlap with category aliasing. It runs as a standalone CLI or as a Claude Code `UserPromptSubmit` hook that automatically injects relevant context into every conversation.
-
-## Install
+Claudette fixes that. Two commands, zero maintenance:
 
 ```bash
 go install github.com/dotcommander/claudette/cmd/claudette@latest
+claudette init
 ```
 
-## Usage
+Now when you type "fix the goroutine deadlock" at 11pm, Claude automatically sees the KB entry you wrote three weeks ago — the one where you spent an hour tracing that channel bug. When your build breaks, Claude surfaces the entry from last time you hit that exact error. Your past debugging sessions become automatic context for every future conversation.
 
-### CLI
+## What changes
+
+**Before:** You write `fix goroutine race condition`. Claude starts from scratch. Your KB entry about Go race patterns sits unread in `~/.claude/kb/go/`.
+
+**After:** Claudette scores your prompt against every KB article, skill, agent, and command you've installed. Claude sees the match, reads the entry, and applies what you already know — before writing a single line of code.
+
+This works for errors too. A test fails with `undefined: NewRouter` — claudette detects the error signal in the tool output, finds your KB entry about chi/v5 import paths, and surfaces it. You stop re-debugging solved problems.
+
+## How it works
+
+Claudette runs as a [Claude Code hook](https://docs.anthropic.com/en/docs/claude-code/hooks) — invisible infrastructure that fires on every prompt:
+
+1. **UserPromptSubmit** — scores your prompt against indexed entries and surfaces the top matches. Runs in under 50ms.
+2. **PostToolResult** — watches for error signals (build failures, test errors, panics) and surfaces relevant KB entries when things break.
+
+`claudette init` wires both hooks into `~/.claude/settings.json` and builds the index. It's idempotent — safe to re-run anytime.
+
+## CLI
+
+You can also search your knowledge base directly:
 
 ```bash
 claudette search goroutine patterns     # search all entry types
-claudette kb sqlite connection pool     # search knowledge base only
-claudette skill refactoring             # search skills only
+claudette kb sqlite connection pool     # KB entries only
+claudette skill refactoring             # skills only
 claudette scan                          # rebuild the index
 ```
 
 **Flags:** `--format json`, `--threshold 3`, `--limit 10`
 
-### Hook Mode
+## What gets indexed
 
-Add to your Claude Code settings to auto-surface relevant entries on every prompt:
+Everything under `~/.claude/`:
+
+| Directory | What's there |
+|-----------|-------------|
+| `kb/` | Knowledge base articles — debugging insights, API quirks, patterns |
+| `skills/` | Skills — specialized capabilities and domain knowledge |
+| `agents/` | Agent definitions |
+| `commands/` | Slash commands |
+| Plugins | Anything installed via `~/.claude/plugins/` |
+
+The index lives at `~/.config/claudette/index.json` and auto-rebuilds when files change. No manual maintenance.
+
+## Configuration
+
+`claudette init` writes `~/.config/claudette/config.json`:
 
 ```json
 {
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "claudette hook"
-          }
-        ]
-      }
-    ],
-    "PostToolResult": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "claudette post-tool-result"
-          }
-        ]
-      }
-    ]
-  }
+  "source_dirs": [
+    "/home/you/.claude/kb",
+    "/home/you/.claude/skills",
+    "/home/you/.claude/agents",
+    "/home/you/.claude/commands"
+  ]
 }
 ```
 
-**UserPromptSubmit hook** — scores the user's prompt and surfaces matching entries. Bypasses the CLI framework for sub-50ms latency.
-
-**PostToolResult hook** — detects error signals in tool output (build failures, test errors, runtime panics) and surfaces relevant KB entries to help diagnose the problem. Produces no output on successful results, so it adds zero overhead to normal operation.
-
-Both hooks log diagnostics to stderr showing tokens, matched entries with scores, and timing.
-
-### Environment Variables
+Add extra directories to index team-wide skill repos or project-specific knowledge. Plugin directories are included automatically.
 
 | Variable | Values | Description |
 |----------|--------|-------------|
-| `CLAUDETTE_OUTPUT` | `full` (default), `compact` | Compact mode shows entry names and descriptions only; full mode shows file paths and titles |
-
-## How It Works
-
-1. **Scan** — Walks `~/.claude/kb/`, skills, agents, commands, and plugin directories. Extracts metadata from YAML frontmatter and markdown headings. Pre-tokenizes keywords per entry.
-2. **Cache** — Stores the index at `~/.config/claudette/index.json`. Auto-rebuilds when file count or max mtime changes.
-3. **Score** — Tokenizes the prompt (removing stop words, preserving internal hyphens), then scores each entry: +1 per keyword match, +2 for category alias hits (e.g., "golang" boosts "go" entries), +1 for plural normalization.
-4. **Rank** — Filters by threshold, caps by limit, sorts by score descending with alphabetical tie-breaking.
+| `CLAUDETTE_OUTPUT` | `full` (default), `compact` | Controls how much detail appears in surfaced entries |
 
 ## Documentation
 
 - [Setup & Installation](docs/setup.md)
 - [Contributing](docs/CONTRIBUTING.md)
 - [Changelog](docs/CHANGELOG.md)
-
-## Dependencies
-
-Two external dependencies: [cobra](https://github.com/spf13/cobra) (CLI framework) and [yaml.v3](https://pkg.go.dev/gopkg.in/yaml.v3) (frontmatter parsing).
 
 ## License
 

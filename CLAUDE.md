@@ -54,7 +54,7 @@ All errors exit silently (no stdout/stderr) — hook must never block the user's
 
 ## Conventions
 
-- Zero config files. Conventions over configuration.
+- Minimal config. `claudette init` writes `~/.config/claudette/config.json` for source dirs; everything else is convention.
 - Two external deps only: cobra, yaml.v3.
 - Entry type classification is directory-based (file in `skills/` dir = skill type), not content-based.
 - Keyword extraction caps description at 200 chars to prevent keyword bloat.
