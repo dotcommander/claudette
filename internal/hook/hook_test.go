@@ -11,7 +11,7 @@ import (
 func makeResults(entries ...index.Entry) []search.ScoredEntry {
 	results := make([]search.ScoredEntry, len(entries))
 	for i, e := range entries {
-		results[i] = search.ScoredEntry{Entry: e, Score: 10 - i}
+		results[i] = search.ScoredEntry{Entry: e, Score: 10 - i, Matched: []string{"hook", "reload"}}
 	}
 	return results
 }
@@ -22,14 +22,23 @@ func TestFormatContext_Full(t *testing.T) {
 		index.Entry{Name: "hook-reload", Title: "Hook Reload Caching", FilePath: "/tmp/test/hook-reload.md"},
 	)
 	got := formatContext(results, "full")
-	if !strings.Contains(got, "read before proceeding") {
-		t.Error("full mode should contain 'read before proceeding' header")
+	if !strings.Contains(got, "<related_skills_knowledge>") {
+		t.Error("full mode should contain <related_skills_knowledge> wrapper")
+	}
+	if !strings.Contains(got, "Only read full files") {
+		t.Error("full mode should contain Only read full files instruction")
 	}
 	if !strings.Contains(got, "hook-reload.md") {
 		t.Error("full mode should contain file path")
 	}
 	if !strings.Contains(got, "Hook Reload Caching") {
 		t.Error("full mode should contain title")
+	}
+	if !strings.Contains(got, "[matched: hook, reload]") {
+		t.Error("full mode should show matched tokens")
+	}
+	if !strings.Contains(got, "</related_skills_knowledge>") {
+		t.Error("full mode should contain closing tag")
 	}
 }
 
@@ -39,8 +48,11 @@ func TestFormatContext_Compact(t *testing.T) {
 		index.Entry{Name: "hook-reload", Title: "Hook Reload Caching", Desc: "Session caching invalidation gotcha", FilePath: "/tmp/test/hook-reload.md"},
 	)
 	got := formatContext(results, "compact")
-	if !strings.Contains(got, "read with Read tool") {
-		t.Error("compact mode should contain 'read with Read tool' header")
+	if !strings.Contains(got, "<related_skills_knowledge>") {
+		t.Error("compact mode should contain <related_skills_knowledge> wrapper")
+	}
+	if !strings.Contains(got, "Only read full files") {
+		t.Error("compact mode should contain Only read full files instruction")
 	}
 	if !strings.Contains(got, "hook-reload") {
 		t.Error("compact mode should contain entry name")
@@ -50,6 +62,12 @@ func TestFormatContext_Compact(t *testing.T) {
 	}
 	if strings.Contains(got, "hook-reload.md") {
 		t.Error("compact mode should not contain file path")
+	}
+	if !strings.Contains(got, "[matched: hook, reload]") {
+		t.Error("compact mode should show matched tokens")
+	}
+	if !strings.Contains(got, "</related_skills_knowledge>") {
+		t.Error("compact mode should contain closing tag")
 	}
 }
 
