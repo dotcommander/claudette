@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.22+ (`go version`)
+- Go 1.26+ (`go version`)
 - Claude Code with hooks support (`~/.claude/settings.json`)
 
 ## Install
@@ -62,14 +62,17 @@ Add this near the top of `~/.claude/CLAUDE.md` so Claude reads surfaced entries:
 Test the hook end-to-end:
 
 ```bash
-# Should return JSON with matching KB entries
+# Should return JSON on stdout, diagnostics on stderr
 echo '{"prompt":"fix goroutine race condition"}' | claudette hook
+# stderr: claudette: [goroutine race condition] -> entry1(4), entry2(3) (12ms)
 
-# Should exit silently (no output)
+# Should log skip reason on stderr (no stdout)
 echo '{"prompt":"update the README"}' | claudette hook
+# stderr: claudette: [update readme] -> no matches (8ms)
 
-# Should exit silently (slash commands skipped)
+# Should skip slash commands
 echo '{"prompt":"/commit"}' | claudette hook
+# stderr: claudette: skip: slash command (0ms)
 ```
 
 Benchmark:
