@@ -12,10 +12,11 @@ const (
 
 // Entry is a single searchable item in the index.
 type Entry struct {
-	Type     EntryType `json:"type"`
-	Name     string    `json:"name"`      // filename stem or frontmatter name
-	Title    string    `json:"title"`     // # heading or frontmatter description
-	Category string    `json:"category"`  // parent dir (go, openai) or type name
-	FilePath string    `json:"file_path"` // absolute path to source file
-	Keywords []string  `json:"keywords"`  // pre-extracted lowercase tokens
+	Type     EntryType      `json:"type"`
+	Name     string         `json:"name"`
+	Title    string         `json:"title"`
+	Category string         `json:"category"`
+	FilePath string         `json:"file_path"`
+	Keywords map[string]int `json:"keywords"`         // word -> field weight (name=3, title=2, tag=2, desc=1)
+	Bigrams  []string       `json:"bigrams,omitzero"` // consecutive word pairs from title
 }

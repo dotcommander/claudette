@@ -5,20 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
 )
 
-const CurrentVersion = 1
+// CurrentVersion is the index schema version; bump when Entry shape changes.
+const CurrentVersion = 2
 
 // Index is the on-disk cache of all scanned entries.
 type Index struct {
-	Version     int       `json:"version"`
-	BuildTime   time.Time `json:"build_time"`
-	SourceMtime time.Time `json:"source_mtime"`
-	FileCount   int       `json:"file_count"`
-	Entries     []Entry   `json:"entries"`
+	Version     int                `json:"version"`
+	BuildTime   time.Time          `json:"build_time"`
+	SourceMtime time.Time          `json:"source_mtime"`
+	FileCount   int                `json:"file_count"`
+	Entries     []Entry            `json:"entries"`
+	IDF         map[string]float64 `json:"idf,omitzero"` // inverse document frequency per keyword
 }
 
 // IndexPath returns ~/.config/claudette/index.json.
@@ -109,6 +112,30 @@ func NeedsRebuild(cached Index, sourceDirs []string) bool {
 	return maxMtime.After(cached.SourceMtime)
 }
 
+// ComputeIDF calculates dampened inverse document frequency for all keywords.
+// Returns a multiplier ranging from 0.5 (ubiquitous) to 2.0 (unique).
+func ComputeIDF(entries []Entry) map[string]float64 {
+	n := float64(len(entries))
+	if n <= 1 {
+		return nil
+	}
+
+	df := make(map[string]int)
+	for _, e := range entries {
+		for word := range e.Keywords {
+			df[word]++
+		}
+	}
+
+	logN := math.Log(n)
+	idf := make(map[string]float64, len(df))
+	for word, count := range df {
+		ratio := math.Log(n/float64(count)) / logN
+		idf[word] = 0.5 + 1.5*ratio
+	}
+	return idf
+}
+
 // LoadOrRebuild loads the index and rebuilds it if stale.
 func LoadOrRebuild(sourceDirs []string) (Index, error) {
 	cached, err := Load()
@@ -133,6 +160,7 @@ func LoadOrRebuild(sourceDirs []string) (Index, error) {
 		SourceMtime: maxMtime,
 		FileCount:   fileCount,
 		Entries:     entries,
+		IDF:         ComputeIDF(entries),
 	}
 	// Best-effort save; failing to persist doesn't block usage.
 	_ = Save(idx)

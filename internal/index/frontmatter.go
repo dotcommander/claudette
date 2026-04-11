@@ -8,8 +8,9 @@ import (
 
 // Frontmatter holds parsed YAML header from component .md files.
 type Frontmatter struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Tags        []string `yaml:"tags"`
 }
 
 var fmDelimiter = []byte("---\n")
