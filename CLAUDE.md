@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Claudette is your partner — a UserPromptSubmit hook that runs on every prompt, surfaces relevant knowledge base entries, skills, agents, and commands before you respond. When you see `UserPromptSubmit hook additional context:` in system reminders, that's claudette working. Read the surfaced entries before proceeding.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Build & Test
