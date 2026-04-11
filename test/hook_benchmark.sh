@@ -166,6 +166,151 @@ add_prompt "edge" "123 456 789 0"                                               
 add_prompt "edge" "GOROUTINE CHANNEL ERROR HANDLING uppercase"                             "" "0"
 
 # ---------------------------------------------------------------------------
+# Wave 2: 100 additional prompts (broader coverage)
+# ---------------------------------------------------------------------------
+
+# --- Go: stdlib, patterns, tooling ---
+add_prompt "go"     "sync.Pool buffer reuse in hot path memory"                            "" "0"
+add_prompt "go"     "errgroup.WithContext fan out bounded concurrency"                      "" "0"
+add_prompt "go"     "go mod tidy vendor dependency management"                             "" "0"
+add_prompt "go"     "golangci-lint configuration disable-all explicit enables"             "" "0"
+add_prompt "go"     "Go 1.26 new features language changes"                                "" "0"
+add_prompt "go"     "Go 1.24 range over function iterators"                                "" "0"
+add_prompt "go"     "strconv vs fmt.Sprint performance conversion"                         "" "0"
+add_prompt "go"     "goccy go-json streaming decoder large files"                          "" "0"
+add_prompt "go"     "Go interface accept return struct pattern"                            "" "0"
+add_prompt "go"     "Go atomic file write temp rename pattern"                             "" "0"
+add_prompt "go"     "os.UserConfigDir platform-aware config paths"                         "" "0"
+add_prompt "go"     "Go test t.Parallel t.Cleanup best practices"                          "" "0"
+
+# --- Go: specific KB entries ---
+add_prompt "go"     "maps.Keys returns iterator not slice Go 1.22"                         "maps-keys-returns-iterator-not-slice" "0"
+add_prompt "go"     "bounded writer must return original length io.Writer"                 "bounded-writer-must-return-original-len" "0"
+add_prompt "go"     "os.Chdir race condition parallel test getwd"                          "chdir-parallel-test-race-getwd" "0"
+add_prompt "go"     "multi module repo submodule tag requirements"                         "multi-module-repo-submodule-tags" "0"
+add_prompt "go"     "lightweight search scoring without embeddings"                        "lightweight-keyword-search-scoring" "0"
+add_prompt "go"     "cross dependency elimination multi-module Go"                         "multi-module-repo-cross-dependency-elimination" "0"
+
+# --- Claude Code: hooks, components, patterns ---
+add_prompt "claude-code" "claude agent specialist component lifecycle"                     "claude-agent" "0"
+add_prompt "claude-code" "commit agent workspace orchestrator clean"                       "commit-agent" "0"
+add_prompt "claude-code" "queen agent task decomposition parallel dispatch"                "queen-agent" "0"
+add_prompt "claude-code" "sherlock agent root cause analysis investigation"                "sherlock-agent" "0"
+add_prompt "claude-code" "loop agent autonomous work until done criteria"                  "loop-agent" "0"
+add_prompt "claude-code" "planner agent opus-tier code change spec"                        "planner-agent" "0"
+add_prompt "claude-code" "design agent front-end UI component specialist"                  "design-agent" "0"
+add_prompt "claude-code" "CLAUDE.md project instructions per-repo"                         "" "0"
+add_prompt "claude-code" "hook performance baselines latency measurement"                  "" "0"
+add_prompt "claude-code" "Claude Code slash commands custom prompts"                       "" "0"
+
+# --- Commands ---
+add_prompt "commands" "commit push tag release workflow"                                    "cpt" "0"
+add_prompt "commands" "deep research fact verification market analysis"                     "research" "0"
+add_prompt "commands" "generate ideas brainstorming creative topic"                         "ideas" "0"
+add_prompt "commands" "spec transform rough notes structured breakdown"                    "spec" "0"
+add_prompt "commands" "handoff durable task survives resets"                                "handoff" "0"
+add_prompt "commands" "refactor code quality DRY SOLID analysis"                            "refactor" "0"
+add_prompt "commands" "crystallize session into reusable skill"                             "skillify" "0"
+add_prompt "commands" "validate external feedback against actual repo"                      "validate" "0"
+
+# --- LLM: specific entries and general ---
+add_prompt "llm"    "GPT nano reasoning tokens completion budget limit"                    "gpt54-nano-reasoning-token-budget" "0"
+add_prompt "llm"    "LLM cost optimization CLI tool token savings"                         "llm-cost-optimization-patterns" "0"
+add_prompt "llm"    "provider model slash namespace collision path"                        "llm-provider-model-slash-namespace-collision" "0"
+add_prompt "llm"    "agent loop context window overflow token budget"                      "agent-loop-context-window-management" "0"
+add_prompt "llm"    "prompt A/B testing what works evaluation"                              "prompt-ab-testing-what-works" "0"
+add_prompt "llm"    "DSPy framework prompt optimization pipeline"                          "" "0"
+add_prompt "llm"    "semantic routing query classification LLM"                            "" "0"
+add_prompt "llm"    "MLX model conversion training Apple Silicon"                          "" "0"
+add_prompt "llm"    "OpenAI responses API tool use function calling"                       "" "0"
+
+# --- Frontend: broader coverage ---
+add_prompt "frontend" "Astro integration hooks custom injections"                          "" "0"
+add_prompt "frontend" "Preact Vite signals migration from React"                           "" "0"
+add_prompt "frontend" "SvelteKit static adapter export prerendering"                       "" "0"
+add_prompt "frontend" "Vercel AI SDK React hooks streaming chat"                           "" "0"
+add_prompt "frontend" "Svelte 5 runes reactive state signals"                              "" "0"
+add_prompt "frontend" "dark mode accessibility a11y responsive"                            "" "0"
+add_prompt "frontend" "component artifact prototype live preview"                          "" "0"
+
+# --- Databases: broader ---
+add_prompt "databases" "pgvector semantic search embeddings similarity"                    "" "0"
+add_prompt "databases" "PostgreSQL connection pool exhaustion max conns"                   "" "0"
+add_prompt "databases" "SQLite modernc driver txlock immediate settings"                   "" "0"
+add_prompt "databases" "goose database migration versioned SQL"                            "" "0"
+add_prompt "databases" "D1 Cloudflare serverless SQLite database"                          "" "0"
+
+# --- Piglet / ZAI ---
+add_prompt "piglet" "extension SDK goroutine variable capture closure"                     "extension-sdk-goroutine-capture-gotcha" "0"
+add_prompt "piglet" "extension testing JSON-RPC protocol piglet"                           "extension-testing-jsonrpc-protocol" "0"
+add_prompt "zai"    "z.ai standard endpoint vs coding plan routing"                        "dual-endpoint-standard-vs-coding-plan" "0"
+
+# --- Refactoring ---
+add_prompt "refactoring" "code smell pipeline detector-first pattern"                      "detector-first-code-smell-pipeline" "0"
+add_prompt "refactoring" "collapse repeated log lines truncation"                          "collapse-repeated-lines-before-truncation" "0"
+add_prompt "refactoring" "dead code removal unused exports cleanup"                        "" "0"
+add_prompt "refactoring" "cyclomatic complexity reduction function split"                  "" "0"
+add_prompt "refactoring" "nesting depth reduction early return guard"                      "" "0"
+
+# --- DevOps / Ops ---
+add_prompt "devops"  "GitHub Actions matrix strategy reusable workflows"                   "" "0"
+add_prompt "devops"  "Cloudflare Workers edge deployment TOO_MANY_REDIRECTS"               "" "0"
+add_prompt "devops"  "Taskfile incremental build task runner"                              "" "0"
+add_prompt "devops"  "yamlfmt YAML formatting indentation config"                          "" "0"
+add_prompt "devops"  "tmux session control remote automation"                              "" "0"
+
+# --- Security ---
+add_prompt "security" "command injection prevention shell escaping"                        "" "0"
+add_prompt "security" "DigitalOcean API token prefix security"                             "" "0"
+add_prompt "security" "dependency audit CVE vulnerability scanning"                        "" "0"
+
+# --- TUI / Terminal ---
+add_prompt "tui"     "bubbletea lipgloss terminal UI model update"                         "" "0"
+add_prompt "tui"     "glamour markdown rendering terminal output"                          "" "0"
+add_prompt "tui"     "huh form input CLI interactive prompts"                              "" "0"
+
+# --- Scraping / Web ---
+add_prompt "web"     "defuddle web content extraction markdown"                            "" "0"
+add_prompt "web"     "Colly web scraping Go concurrent crawl"                              "" "0"
+add_prompt "web"     "RSS feed aggregation pipeline daily updates"                         "" "0"
+
+# --- Rust ---
+add_prompt "rust"    "Rust async Tokio borrow checker lifetime"                            "" "0"
+add_prompt "rust"    "Rust testing cargo test mock strategies"                              "" "0"
+
+# --- TypeScript ---
+add_prompt "typescript" "TypeScript strict mode Zod schema validation"                     "" "0"
+add_prompt "typescript" "BullMQ job queue Node.js worker processing"                       "" "0"
+
+# --- PHP ---
+add_prompt "php"     "Laravel Livewire Inertia full-stack PHP"                             "" "0"
+add_prompt "php"     "PHP 8 type safety value objects enums"                               "" "0"
+
+# --- Misc / cross-cutting ---
+add_prompt "misc"    "book authoring pipeline outline draft review"                        "author" "0"
+add_prompt "misc"    "blog post drafting rewriting publishing"                             "" "0"
+add_prompt "misc"    "macOS disk space storage cache cleanup"                              "" "0"
+add_prompt "misc"    "Electron desktop app automation testing"                             "" "0"
+
+# --- Synonym / alias tests (should match via aliases or stems) ---
+add_prompt "alias"   "golang concurrency patterns"                                         "" "0"
+add_prompt "alias"   "react component hooks state management"                              "" "0"
+add_prompt "alias"   "svelte sveltekit server-side rendering"                              "" "0"
+add_prompt "alias"   "nextjs app router RSC server components"                             "" "0"
+add_prompt "alias"   "postgres query optimization indexing"                                "" "0"
+
+# --- Multi-topic / compound queries ---
+add_prompt "compound" "convert React app to Svelte with Tailwind"                          "" "0"
+add_prompt "compound" "Go CLI with cobra and bubbletea terminal UI"                        "" "0"
+add_prompt "compound" "deploy SvelteKit to Cloudflare Workers edge"                        "" "0"
+add_prompt "compound" "RAG pipeline with pgvector embeddings search"                       "" "0"
+
+# --- Gibberish / noise: SHOULD produce no results ---
+add_prompt "noise"   "asdfghjkl qwertyuiop"                                               "" "1"
+add_prompt "noise"   "xyzzy plugh foo bar baz"                                             "" "1"
+add_prompt "noise"   "aaaaaa bbbbbb cccccc"                                                "" "1"
+
+# ---------------------------------------------------------------------------
 # Run each prompt through claudette hook and collect results
 # ---------------------------------------------------------------------------
 
@@ -462,7 +607,7 @@ echo ""
 # Category distribution
 echo "MATCH DISTRIBUTION BY CATEGORY"
 echo "-------------------------------"
-for cat in go python frontend claude-code refactoring devops databases llm security piglet zai bigram stopwords vague slash edge; do
+for cat in go python frontend claude-code commands refactoring devops databases llm security piglet zai tui web rust typescript php misc alias compound bigram stopwords vague slash edge noise; do
   cat_total=0
   cat_matched=0
   for i in "${!PROMPTS[@]}"; do
