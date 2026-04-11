@@ -16,10 +16,25 @@ type ScoredEntry struct {
 	Matched []string    `json:"matched"`
 }
 
+// bm25 computes the BM25 term score for a single keyword occurrence.
+// weight is the field weight (name=3, title=2, tag=2, desc=1).
+// idf is the dampened inverse document frequency multiplier.
+// dl is the document length (number of keywords in this entry).
+// avgdl is the average document length across all entries.
+// When avgdl is 0 (single-entry corpus or unset), falls back to weight×idf.
+func bm25(weight int, idf, dl, avgdl float64) float64 {
+	const k1, b = 1.2, 0.75
+	if avgdl == 0 {
+		return float64(weight) * idf
+	}
+	tf := float64(weight)
+	return tf * (k1 + 1) / (tf + k1*(1-b+b*dl/avgdl)) * idf
+}
+
 // Score computes relevance scores for all entries against tokenized prompt.
-// Uses field-weighted keywords, IDF multipliers, stem matching, and bigrams.
+// Uses field-weighted keywords, IDF multipliers, BM25 saturation, and bigrams.
 // Returns entries with score >= threshold, sorted by score descending.
-func Score(entries []index.Entry, tokens []string, threshold int, idf map[string]float64) []ScoredEntry {
+func Score(entries []index.Entry, tokens []string, threshold int, idf map[string]float64, avgdl float64) []ScoredEntry {
 	if len(tokens) == 0 {
 		return nil
 	}
@@ -31,7 +46,7 @@ func Score(entries []index.Entry, tokens []string, threshold int, idf map[string
 	var results []ScoredEntry
 
 	for _, entry := range entries {
-		score, matched := scoreEntry(entry, tokens, promptBigrams, idf)
+		score, matched := scoreEntry(entry, tokens, promptBigrams, idf, avgdl)
 		if score >= threshF {
 			results = append(results, ScoredEntry{
 				Entry:   entry,
@@ -52,12 +67,13 @@ func Score(entries []index.Entry, tokens []string, threshold int, idf map[string
 }
 
 // scoreEntry computes the score and matched tokens for a single entry.
-func scoreEntry(entry index.Entry, tokens []string, promptBigrams []string, idf map[string]float64) (float64, []string) {
+func scoreEntry(entry index.Entry, tokens []string, promptBigrams []string, idf map[string]float64, avgdl float64) (float64, []string) {
 	var score float64
 	var matched []string
 
+	dl := float64(len(entry.Keywords))
 	for _, tok := range tokens {
-		delta, hit := scoreToken(entry, tok, idf)
+		delta, hit := scoreToken(entry, tok, idf, dl, avgdl)
 		score += delta
 		if hit {
 			matched = append(matched, tok)
@@ -83,7 +99,8 @@ func scoreEntry(entry index.Entry, tokens []string, promptBigrams []string, idf 
 }
 
 // scoreToken returns the score contribution and whether the token matched.
-func scoreToken(entry index.Entry, tok string, idf map[string]float64) (float64, bool) {
+// dl is the document length (len(entry.Keywords)); avgdl is the corpus average.
+func scoreToken(entry index.Entry, tok string, idf map[string]float64, dl, avgdl float64) (float64, bool) {
 	mul := idfMul(idf, tok)
 	var delta float64
 
@@ -92,26 +109,26 @@ func scoreToken(entry index.Entry, tok string, idf map[string]float64) (float64,
 		delta += 2.0 * mul
 	}
 
-	// Direct keyword match: weight × IDF.
+	// Direct keyword match: BM25(weight, IDF, dl, avgdl).
 	if weight, ok := entry.Keywords[tok]; ok {
-		return delta + float64(weight)*mul, true
+		return delta + bm25(weight, mul, dl, avgdl), true
 	}
 
-	// Plural normalization: weight × 0.9 × IDF.
+	// Plural normalization: BM25 × 0.9.
 	if weight, ok := entry.Keywords[tok+"s"]; ok {
-		return delta + float64(weight)*0.9*mul, true
+		return delta + bm25(weight, mul, dl, avgdl)*0.9, true
 	}
 	if stem, ok := strings.CutSuffix(tok, "s"); ok {
 		if weight, ok := entry.Keywords[stem]; ok {
-			return delta + float64(weight)*0.9*mul, true
+			return delta + bm25(weight, mul, dl, avgdl)*0.9, true
 		}
 	}
 
-	// Stem/prefix match: weight × 0.6 × IDF.
+	// Stem/prefix match: BM25 × 0.6.
 	if len(tok) >= 4 {
 		for kw, weight := range entry.Keywords {
 			if HasStemMatch(tok, kw) {
-				return delta + float64(weight)*0.6*mul, true
+				return delta + bm25(weight, mul, dl, avgdl)*0.6, true
 			}
 		}
 	}
@@ -133,8 +150,8 @@ func buildBigrams(tokens []string) []string {
 }
 
 // ScoreTop returns at most limit results.
-func ScoreTop(entries []index.Entry, tokens []string, threshold, limit int, idf map[string]float64) []ScoredEntry {
-	results := Score(entries, tokens, threshold, idf)
+func ScoreTop(entries []index.Entry, tokens []string, threshold, limit int, idf map[string]float64, avgdl float64) []ScoredEntry {
+	results := Score(entries, tokens, threshold, idf, avgdl)
 	if len(results) > limit {
 		return results[:limit]
 	}

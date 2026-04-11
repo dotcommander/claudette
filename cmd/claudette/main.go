@@ -16,13 +16,22 @@ import (
 var version = "dev"
 
 func main() {
-	// Fast path: hook mode bypasses cobra entirely for speed.
-	if len(os.Args) > 1 && os.Args[1] == "hook" {
-		if err := hook.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "claudette hook: %v\n", err)
-			os.Exit(1)
+	// Fast path: bypass cobra entirely for hot code paths.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "hook":
+			if err := hook.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "claudette hook: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "post-tool-result":
+			if err := hook.RunPostToolResult(); err != nil {
+				fmt.Fprintf(os.Stderr, "claudette post-tool-result: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		}
-		return
 	}
 
 	if err := rootCmd().Execute(); err != nil {
@@ -108,7 +117,7 @@ func runSearch(prompt, format string, threshold, limit int, filter string) error
 
 	stops := search.DefaultStopWords()
 	tokens := search.Tokenize(prompt, stops)
-	results := search.ScoreTop(entries, tokens, threshold, limit, idx.IDF)
+	results := search.ScoreTop(entries, tokens, threshold, limit, idx.IDF, idx.AvgFieldLen)
 
 	switch format {
 	case "json":
@@ -141,6 +150,7 @@ func scanCmd() *cobra.Command {
 				FileCount:   fileCount,
 				Entries:     entries,
 				IDF:         index.ComputeIDF(entries),
+				AvgFieldLen: index.ComputeAvgFieldLen(entries),
 			}
 			if err := index.Save(idx); err != nil {
 				return fmt.Errorf("saving index: %w", err)

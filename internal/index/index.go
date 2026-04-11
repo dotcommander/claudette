@@ -21,7 +21,8 @@ type Index struct {
 	SourceMtime time.Time          `json:"source_mtime"`
 	FileCount   int                `json:"file_count"`
 	Entries     []Entry            `json:"entries"`
-	IDF         map[string]float64 `json:"idf,omitzero"` // inverse document frequency per keyword
+	IDF         map[string]float64 `json:"idf,omitzero"`  // inverse document frequency per keyword
+	AvgFieldLen float64            `json:"avg_field_len"` // average number of keywords per entry (for BM25)
 }
 
 // IndexPath returns ~/.config/claudette/index.json.
@@ -112,6 +113,19 @@ func NeedsRebuild(cached Index, sourceDirs []string) bool {
 	return maxMtime.After(cached.SourceMtime)
 }
 
+// ComputeAvgFieldLen returns the average number of keywords per entry.
+// Used as the avgdl denominator in BM25 length normalization.
+func ComputeAvgFieldLen(entries []Entry) float64 {
+	if len(entries) == 0 {
+		return 0
+	}
+	totalKw := 0
+	for _, e := range entries {
+		totalKw += len(e.Keywords)
+	}
+	return float64(totalKw) / float64(len(entries))
+}
+
 // ComputeIDF calculates dampened inverse document frequency for all keywords.
 // Returns a multiplier ranging from 0.5 (ubiquitous) to 2.0 (unique).
 func ComputeIDF(entries []Entry) map[string]float64 {
@@ -161,6 +175,7 @@ func LoadOrRebuild(sourceDirs []string) (Index, error) {
 		FileCount:   fileCount,
 		Entries:     entries,
 		IDF:         ComputeIDF(entries),
+		AvgFieldLen: ComputeAvgFieldLen(entries),
 	}
 	// Best-effort save; failing to persist doesn't block usage.
 	_ = Save(idx)
