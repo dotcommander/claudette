@@ -6,5 +6,8 @@
 .idea/
 .vscode/
 
+# Test outputs
+test/hook_results.tsv
+
 # OS
 .DS_Store
