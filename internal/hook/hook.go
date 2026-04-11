@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dotcommander/claudette/internal/index"
@@ -260,14 +261,20 @@ func logStatus(prefix string, status *string, start time.Time) func() {
 	}
 }
 
+var (
+	homePrefixVal  string
+	homePrefixOnce sync.Once
+)
+
 // homePrefix returns ~/.claude/ as an absolute path for trimming.
-// Computed once per formatContext call rather than per entry.
+// Computed once per process via sync.Once — home dir never changes at runtime.
 func homePrefix() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".claude") + string(os.PathSeparator)
+	homePrefixOnce.Do(func() {
+		if home, err := os.UserHomeDir(); err == nil {
+			homePrefixVal = filepath.Join(home, ".claude") + string(os.PathSeparator)
+		}
+	})
+	return homePrefixVal
 }
 
 func trimHome(path, prefix string) string {
