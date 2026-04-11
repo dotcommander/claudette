@@ -70,8 +70,10 @@ func WriteClaudeSettings(settings map[string]any) error {
 }
 
 // UpsertHookEntry ensures a hook command is registered for the given event.
-// If any existing hook command contains the identifier substring, the event
-// is skipped (idempotent). Returns true if a new hook was wired.
+// If an existing hook command contains the identifier substring and already
+// matches the desired command, no change is made (idempotent). If it contains
+// the identifier but the command differs, the command is updated in place.
+// Returns true if a hook was added or updated.
 // Returns an error if the event name is not a valid Claude Code hook event.
 func UpsertHookEntry(settings map[string]any, event, command string, identifier string) (bool, error) {
 	if _, ok := validHookEvents[event]; !ok {
@@ -89,7 +91,7 @@ func UpsertHookEntry(settings map[string]any, event, command string, identifier 
 		groups = nil
 	}
 
-	// Check if already wired.
+	// Check if already wired; update command in place if stale.
 	for _, g := range groups {
 		group, ok := g.(map[string]any)
 		if !ok {
@@ -104,9 +106,15 @@ func UpsertHookEntry(settings map[string]any, event, command string, identifier 
 			if !ok {
 				continue
 			}
-			if cmd, _ := entry["command"].(string); strings.Contains(cmd, identifier) {
-				return false, nil
+			cmd, _ := entry["command"].(string)
+			if !strings.Contains(cmd, identifier) {
+				continue
 			}
+			if cmd == command {
+				return false, nil // already correct
+			}
+			entry["command"] = command
+			return true, nil // updated stale command
 		}
 	}
 
@@ -125,17 +133,20 @@ func UpsertHookEntry(settings map[string]any, event, command string, identifier 
 	return true, nil
 }
 
-// RemoveInvalidHookEvents removes any hook event keys from settings that are
-// not recognised by Claude Code. This cleans up damage from older claudette
-// versions that wrote "PostToolResult" (invalid) instead of "PostToolUse".
+// deprecatedHookEvents are event names that older claudette versions
+// incorrectly wrote. Only these specific keys are cleaned up — we never
+// delete hook events we don't own.
+var deprecatedHookEvents = []string{"PostToolResult"}
+
+// RemoveInvalidHookEvents cleans up hook event keys that older claudette
+// versions wrote incorrectly (e.g., "PostToolResult" instead of "PostToolUse").
+// Only removes known-bad keys — never touches events registered by other tools.
 func RemoveInvalidHookEvents(settings map[string]any) {
 	hooksMap, ok := settings["hooks"].(map[string]any)
 	if !ok {
 		return
 	}
-	for key := range hooksMap {
-		if _, valid := validHookEvents[key]; !valid {
-			delete(hooksMap, key)
-		}
+	for _, key := range deprecatedHookEvents {
+		delete(hooksMap, key)
 	}
 }

@@ -42,6 +42,18 @@ func logStatus(prefix string, status *string, start time.Time) func() {
 	}
 }
 
+// writeHookResponse logs usage, builds the hook response, and writes it to stdout.
+func writeHookResponse(event string, results []search.ScoredEntry) error {
+	logUsage(results)
+	resp := HookResponse{
+		HookSpecificOutput: &HookSpecificOutput{
+			HookEventName:     event,
+			AdditionalContext: formatContext(results, outputMode()),
+		},
+	}
+	return json.NewEncoder(os.Stdout).Encode(resp)
+}
+
 // Run reads HookInput from stdin, scores entries, writes context to stdout.
 // Logs diagnostics to stderr for visibility during Claude Code sessions.
 func Run() error {
@@ -85,17 +97,7 @@ func Run() error {
 		return nil
 	}
 
-	logUsage(results)
-
-	resp := HookResponse{
-		HookSpecificOutput: &HookSpecificOutput{
-			HookEventName:     "UserPromptSubmit",
-			AdditionalContext: formatContext(results, outputMode()),
-		},
-	}
-
-	enc := json.NewEncoder(os.Stdout)
-	return enc.Encode(resp)
+	return writeHookResponse("UserPromptSubmit", results)
 }
 
 // scoreTokens loads (or rebuilds) the index and scores tokens against it.
@@ -184,19 +186,19 @@ func relPath(e index.Entry) string {
 	return e.FilePath
 }
 
-// PostToolResultInput matches Claude Code's PostToolUse hook stdin JSON.
-type PostToolResultInput struct {
+// PostToolUseInput matches Claude Code's PostToolUse hook stdin JSON.
+type PostToolUseInput struct {
 	ToolName   string `json:"tool_name"`
 	ToolInput  any    `json:"tool_input"`
 	ToolResult any    `json:"tool_result"`
 }
 
-// RunPostToolResult reads PostToolResultInput from stdin, checks for error signals,
+// RunPostToolUse reads PostToolUseInput from stdin, checks for error signals,
 // and surfaces relevant KB entries when the tool output indicates a failure.
 // Successful tool outputs produce no output, preserving hook performance.
-func RunPostToolResult() error {
+func RunPostToolUse() error {
 	var status string
-	defer logStatus("claudette post-tool-result", &status, time.Now())()
+	defer logStatus("claudette post-tool-use", &status, time.Now())()
 
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20)) // 1MB cap
 	if err != nil {
@@ -204,7 +206,7 @@ func RunPostToolResult() error {
 		return err
 	}
 
-	var input PostToolResultInput
+	var input PostToolUseInput
 	if err := json.Unmarshal(data, &input); err != nil {
 		status = "skip: malformed input"
 		return nil
@@ -254,15 +256,5 @@ func RunPostToolResult() error {
 		return nil
 	}
 
-	logUsage(results)
-
-	resp := HookResponse{
-		HookSpecificOutput: &HookSpecificOutput{
-			HookEventName:     "PostToolUse",
-			AdditionalContext: formatContext(results, outputMode()),
-		},
-	}
-
-	enc := json.NewEncoder(os.Stdout)
-	return enc.Encode(resp)
+	return writeHookResponse("PostToolUse", results)
 }

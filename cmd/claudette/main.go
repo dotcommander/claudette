@@ -26,9 +26,9 @@ func main() {
 				os.Exit(1)
 			}
 			return
-		case "post-tool-result":
-			if err := hook.RunPostToolResult(); err != nil {
-				fmt.Fprintf(os.Stderr, "claudette post-tool-result: %v\n", err)
+		case "post-tool-use":
+			if err := hook.RunPostToolUse(); err != nil {
+				fmt.Fprintf(os.Stderr, "claudette post-tool-use: %v\n", err)
 				os.Exit(1)
 			}
 			return
@@ -190,7 +190,7 @@ func runInit() error {
 	}
 
 	hookCmd := binPath + " hook"
-	postCmd := binPath + " post-tool-result"
+	postCmd := binPath + " post-tool-use"
 
 	// Clean up invalid hook event from older claudette versions.
 	index.RemoveInvalidHookEvents(settings)
