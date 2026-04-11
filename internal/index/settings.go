@@ -104,10 +104,7 @@ func UpsertHookEntry(settings map[string]any, event, command string, identifier 
 		settings["hooks"] = hooksMap
 	}
 
-	groups, ok := hooksMap[event].([]any)
-	if !ok {
-		groups = nil
-	}
+	groups, _ := hooksMap[event].([]any)
 
 	// Check if already wired; update command in place if stale.
 	for _, g := range groups {

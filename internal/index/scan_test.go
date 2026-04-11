@@ -30,6 +30,7 @@ More detailed content here...
 `
 
 func TestBodyContentSections_PriorityBeforePreamble(t *testing.T) {
+	t.Parallel()
 	result := bodyContentSections([]byte(skillFixture), 500)
 
 	// "When to Use" and "Quick Reference" are priority sections —
@@ -53,6 +54,7 @@ func TestBodyContentSections_PriorityBeforePreamble(t *testing.T) {
 }
 
 func TestBodyContentSections_FrontmatterStripped(t *testing.T) {
+	t.Parallel()
 	result := bodyContentSections([]byte(skillFixture), 500)
 	if strings.Contains(result, "name: test-skill") {
 		t.Error("frontmatter should be stripped from body content")
@@ -60,6 +62,7 @@ func TestBodyContentSections_FrontmatterStripped(t *testing.T) {
 }
 
 func TestBodyContentSections_RespectsBudget(t *testing.T) {
+	t.Parallel()
 	result := bodyContentSections([]byte(skillFixture), 50)
 	runes := []rune(result)
 	if len(runes) > 50 {
@@ -68,6 +71,7 @@ func TestBodyContentSections_RespectsBudget(t *testing.T) {
 }
 
 func TestBodyContentSections_NoPrioritySections(t *testing.T) {
+	t.Parallel()
 	noPriority := `---
 name: plain
 description: no priority headers
@@ -88,6 +92,7 @@ Still nothing special here.
 }
 
 func TestBodyContentSections_NilFrontmatter(t *testing.T) {
+	t.Parallel()
 	noFM := `# Just a title
 
 Some content without any frontmatter at all.

@@ -101,25 +101,27 @@ func walkMdFiles(dirs []string, fn func(path string, info fs.FileInfo, sourceDir
 	return nil
 }
 
-// Scan walks all source directories and builds entries.
-// Returns entries, max mtime across all files, and total file count.
-func Scan(sourceDirs []string) ([]Entry, time.Time, int, error) {
-	var entries []Entry
-	var maxMtime time.Time
-	var fileCount int
+// ScanResult holds the output of a directory scan.
+type ScanResult struct {
+	Entries   []Entry
+	MaxMtime  time.Time
+	FileCount int
+}
 
+// Scan walks all source directories and builds entries.
+func Scan(sourceDirs []string) (ScanResult, error) {
+	var r ScanResult
 	if err := walkMdFiles(sourceDirs, func(path string, info fs.FileInfo, sourceDir string) {
-		fileCount++
-		if info.ModTime().After(maxMtime) {
-			maxMtime = info.ModTime()
+		r.FileCount++
+		if info.ModTime().After(r.MaxMtime) {
+			r.MaxMtime = info.ModTime()
 		}
 		entry, ok := parseEntry(path, sourceDir)
 		if ok {
-			entries = append(entries, entry)
+			r.Entries = append(r.Entries, entry)
 		}
 	}); err != nil {
-		return nil, time.Time{}, 0, err
+		return ScanResult{}, err
 	}
-
-	return entries, maxMtime, fileCount, nil
+	return r, nil
 }

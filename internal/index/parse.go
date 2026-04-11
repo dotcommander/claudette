@@ -1,11 +1,11 @@
 package index
 
 import (
-	"bufio"
 	"bytes"
 	"cmp"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -81,22 +81,7 @@ func classifyType(path, sourceDir string) EntryType {
 }
 
 func extractTitle(data []byte) string {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	lineNum := 0
-	inFrontmatter := false
-	for scanner.Scan() {
-		line := scanner.Text()
-		lineNum++
-		if lineNum == 1 && line == "---" {
-			inFrontmatter = true
-			continue
-		}
-		if inFrontmatter {
-			if line == "---" {
-				inFrontmatter = false
-			}
-			continue
-		}
+	for _, line := range strings.Split(string(stripFrontmatter(data)), "\n") {
 		if strings.HasPrefix(line, "# ") {
 			return strings.TrimPrefix(line, "# ")
 		}
@@ -187,12 +172,9 @@ func stripFrontmatter(data []byte) []byte {
 }
 
 func isPrioritySection(header string) bool {
-	for _, kw := range prioritySectionKeywords {
-		if strings.Contains(header, kw) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(prioritySectionKeywords, func(kw string) bool {
+		return strings.Contains(header, kw)
+	})
 }
 
 func filenameStem(path string) string {

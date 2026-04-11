@@ -2,7 +2,6 @@ package index
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"math"
@@ -61,18 +60,18 @@ func Save(idx Index) error {
 
 // buildIndex scans source directories and constructs a fresh Index.
 func buildIndex(sourceDirs []string) (Index, error) {
-	entries, maxMtime, fileCount, err := Scan(sourceDirs)
+	scan, err := Scan(sourceDirs)
 	if err != nil {
 		return Index{}, fmt.Errorf("scan failed: %w", err)
 	}
 	return Index{
 		Version:     CurrentVersion,
 		BuildTime:   time.Now(),
-		SourceMtime: maxMtime,
-		FileCount:   fileCount,
-		Entries:     entries,
-		IDF:         ComputeIDF(entries),
-		AvgFieldLen: ComputeAvgFieldLen(entries),
+		SourceMtime: scan.MaxMtime,
+		FileCount:   scan.FileCount,
+		Entries:     scan.Entries,
+		IDF:         ComputeIDF(scan.Entries),
+		AvgFieldLen: ComputeAvgFieldLen(scan.Entries),
 	}, nil
 }
 
@@ -152,16 +151,11 @@ func ComputeIDF(entries []Entry) map[string]float64 {
 // LoadOrRebuild loads the index and rebuilds it if stale.
 func LoadOrRebuild(sourceDirs []string) (Index, error) {
 	cached, err := Load()
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		// Corrupt or unreadable — rebuild
-		cached = Index{}
-	}
-
-	needsRebuild := errors.Is(err, os.ErrNotExist) || NeedsRebuild(cached, sourceDirs)
-	if !needsRebuild {
+	if err == nil && !NeedsRebuild(cached, sourceDirs) {
 		return cached, nil
 	}
 
+	// Missing, corrupt, or stale — rebuild.
 	idx, err := buildIndex(sourceDirs)
 	if err != nil {
 		return Index{}, err

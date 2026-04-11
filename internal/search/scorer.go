@@ -171,9 +171,6 @@ func FilterByType(entries []index.Entry, t index.EntryType) []index.Entry {
 
 // idfMul returns the IDF multiplier for a token, defaulting to 1.0 for unknown tokens.
 func idfMul(idf map[string]float64, token string) float64 {
-	if idf == nil {
-		return 1.0
-	}
 	if w, ok := idf[token]; ok {
 		return w
 	}

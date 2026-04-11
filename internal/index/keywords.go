@@ -96,11 +96,8 @@ func extractBigrams(title string) []string {
 func makeAdder(kw map[string]int) func(string, int) {
 	return func(word string, weight int) {
 		w := strings.ToLower(word)
-		if len(w) <= 1 {
-			return
-		}
-		if cur, ok := kw[w]; !ok || weight > cur {
-			kw[w] = weight
+		if len(w) > 1 {
+			kw[w] = max(kw[w], weight)
 		}
 	}
 }
