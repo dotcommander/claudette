@@ -108,7 +108,7 @@ func runSearch(prompt, format string, threshold, limit int, filter string) error
 
 	stops := search.DefaultStopWords()
 	tokens := search.Tokenize(prompt, stops)
-	results := search.ScoreTop(entries, tokens, threshold, limit)
+	results := search.ScoreTop(entries, tokens, threshold, limit, idx.IDF)
 
 	switch format {
 	case "json":
@@ -136,10 +136,11 @@ func scanCmd() *cobra.Command {
 
 			idx := index.Index{
 				Version:     index.CurrentVersion,
-				BuildTime:   maxMtime, // use scan time
+				BuildTime:   maxMtime,
 				SourceMtime: maxMtime,
 				FileCount:   fileCount,
 				Entries:     entries,
+				IDF:         index.ComputeIDF(entries),
 			}
 			if err := index.Save(idx); err != nil {
 				return fmt.Errorf("saving index: %w", err)

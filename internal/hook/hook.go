@@ -79,7 +79,7 @@ func Run() error {
 		return nil
 	}
 
-	results := search.ScoreTop(idx.Entries, tokens, search.DefaultThreshold, search.DefaultLimit)
+	results := search.ScoreTop(idx.Entries, tokens, search.DefaultThreshold, search.DefaultLimit, idx.IDF)
 	if len(results) == 0 {
 		status = fmt.Sprintf("%v -> no matches", tokens)
 		return nil
