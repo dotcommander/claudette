@@ -170,6 +170,7 @@ func parseEntry(path, sourceDir string) (Entry, bool) {
 		Type:     entryType,
 		Name:     name,
 		Title:    firstNonEmpty(title, name),
+		Desc:     truncateRunes(description, 200),
 		Category: category,
 		FilePath: path,
 		Keywords: keywords,
@@ -396,7 +397,10 @@ func bodyContentSections(data []byte, maxRunes int) string {
 
 	// Concatenate: priority sections first, then fallback.
 	var sb strings.Builder
-	for _, part := range append(priority, fallback...) {
+	for _, part := range priority {
+		sb.WriteString(part)
+	}
+	for _, part := range fallback {
 		sb.WriteString(part)
 	}
 

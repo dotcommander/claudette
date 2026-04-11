@@ -34,14 +34,19 @@ type HookSpecificOutput struct {
 	AdditionalContext string `json:"additionalContext,omitempty"`
 }
 
+// logStatus emits a diagnostic line to stderr on return from the calling hook.
+// Usage: defer logStatus("claudette", &status, time.Now())()
+func logStatus(prefix string, status *string, start time.Time) func() {
+	return func() {
+		fmt.Fprintf(os.Stderr, "%s: %s (%dms)\n", prefix, *status, time.Since(start).Milliseconds())
+	}
+}
+
 // Run reads HookInput from stdin, scores entries, writes context to stdout.
 // Logs diagnostics to stderr for visibility during Claude Code sessions.
 func Run() error {
-	start := time.Now()
 	var status string
-	defer func() {
-		fmt.Fprintf(os.Stderr, "claudette: %s (%dms)\n", status, time.Since(start).Milliseconds())
-	}()
+	defer logStatus("claudette", &status, time.Now())()
 
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20)) // 1MB cap
 	if err != nil {
@@ -80,10 +85,12 @@ func Run() error {
 		return nil
 	}
 
+	logUsage(results)
+
 	resp := HookResponse{
 		HookSpecificOutput: &HookSpecificOutput{
 			HookEventName:     "UserPromptSubmit",
-			AdditionalContext: formatContext(results),
+			AdditionalContext: formatContext(results, outputMode()),
 		},
 	}
 
@@ -112,6 +119,9 @@ func scoreTokens(tokens []string) ([]search.ScoredEntry, string, error) {
 	if hits[0].Score < search.DefaultThreshold*search.DefaultConfidenceMultiplier {
 		return nil, fmt.Sprintf("%v -> suppressed (low confidence, top score %d)", tokens, hits[0].Score), nil
 	}
+	if len(hits[0].Matched) < 2 && hits[0].Score < search.DefaultSingleTokenFloor {
+		return nil, fmt.Sprintf("%v -> suppressed (single-token weak match, score %d)", tokens, hits[0].Score), nil
+	}
 
 	var names []string
 	for _, r := range hits {
@@ -120,13 +130,46 @@ func scoreTokens(tokens []string) ([]search.ScoredEntry, string, error) {
 	return hits, fmt.Sprintf("%v -> %s", tokens, strings.Join(names, ", ")), nil
 }
 
-func formatContext(results []search.ScoredEntry) string {
+func formatContext(results []search.ScoredEntry, mode string) string {
 	var b strings.Builder
-	b.WriteString("Relevant knowledge base entries — read before proceeding:")
-	for _, r := range results {
-		fmt.Fprintf(&b, "\n  %s — %s", relPath(r.Entry), r.Entry.Title)
+	if mode == "compact" {
+		b.WriteString("Relevant entries (read with Read tool if needed):")
+		for _, r := range results {
+			desc := r.Entry.Desc
+			if desc == "" {
+				desc = r.Entry.Title
+			}
+			fmt.Fprintf(&b, "\n  %s — %s", r.Entry.Name, desc)
+		}
+	} else {
+		b.WriteString("Relevant knowledge base entries — read before proceeding:")
+		for _, r := range results {
+			fmt.Fprintf(&b, "\n  %s — %s", relPath(r.Entry), r.Entry.Title)
+		}
 	}
 	return b.String()
+}
+
+// outputMode reads CLAUDETTE_OUTPUT from the environment.
+func outputMode() string {
+	if os.Getenv("CLAUDETTE_OUTPUT") == "compact" {
+		return "compact"
+	}
+	return "full"
+}
+
+// logUsage records surfaced entries to the append-only usage log.
+func logUsage(results []search.ScoredEntry) {
+	now := time.Now()
+	records := make([]index.UsageRecord, len(results))
+	for i, r := range results {
+		records[i] = index.UsageRecord{
+			Timestamp: now,
+			Name:      r.Entry.Name,
+			Score:     r.Score,
+		}
+	}
+	_ = index.AppendUsageLog(records)
 }
 
 func relPath(e index.Entry) string {
@@ -152,11 +195,8 @@ type PostToolResultInput struct {
 // and surfaces relevant KB entries when the tool result indicates a failure.
 // Successful tool results produce no output, preserving hook performance.
 func RunPostToolResult() error {
-	start := time.Now()
 	var status string
-	defer func() {
-		fmt.Fprintf(os.Stderr, "claudette post-tool-result: %s (%dms)\n", status, time.Since(start).Milliseconds())
-	}()
+	defer logStatus("claudette post-tool-result", &status, time.Now())()
 
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20)) // 1MB cap
 	if err != nil {
@@ -214,10 +254,12 @@ func RunPostToolResult() error {
 		return nil
 	}
 
+	logUsage(results)
+
 	resp := HookResponse{
 		HookSpecificOutput: &HookSpecificOutput{
 			HookEventName:     "PostToolResult",
-			AdditionalContext: formatContext(results),
+			AdditionalContext: formatContext(results, outputMode()),
 		},
 	}
 

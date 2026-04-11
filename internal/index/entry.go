@@ -15,8 +15,10 @@ type Entry struct {
 	Type     EntryType      `json:"type"`
 	Name     string         `json:"name"`
 	Title    string         `json:"title"`
+	Desc     string         `json:"desc,omitzero"` // one-liner from frontmatter description
 	Category string         `json:"category"`
 	FilePath string         `json:"file_path"`
-	Keywords map[string]int `json:"keywords"`         // word -> field weight (name=3, title=2, tag=2, desc=1)
-	Bigrams  []string       `json:"bigrams,omitzero"` // consecutive word pairs from title
+	Keywords map[string]int `json:"keywords"`           // word -> field weight (name=3, title=2, tag=2, desc=1)
+	Bigrams  []string       `json:"bigrams,omitzero"`   // consecutive word pairs from title
+	HitCount int            `json:"hit_count,omitzero"` // aggregated usage count from log compaction
 }

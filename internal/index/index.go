@@ -12,7 +12,7 @@ import (
 )
 
 // CurrentVersion is the index schema version; bump when Entry shape changes.
-const CurrentVersion = 2
+const CurrentVersion = 3
 
 // Index is the on-disk cache of all scanned entries.
 type Index struct {
@@ -177,7 +177,21 @@ func LoadOrRebuild(sourceDirs []string) (Index, error) {
 		IDF:         ComputeIDF(entries),
 		AvgFieldLen: ComputeAvgFieldLen(entries),
 	}
+
+	// Compact usage log into entry hit counts.
+	records, logErr := ParseUsageLog()
+	if logErr == nil && len(records) > 0 {
+		counts := AggregateHitCounts(records)
+		for i := range idx.Entries {
+			if c, ok := counts[idx.Entries[i].Name]; ok {
+				idx.Entries[i].HitCount = c
+			}
+		}
+	}
+
 	// Best-effort save; failing to persist doesn't block usage.
-	_ = Save(idx)
+	if saveErr := Save(idx); saveErr == nil && logErr == nil && len(records) > 0 {
+		_ = TruncateUsageLog()
+	}
 	return idx, nil
 }
