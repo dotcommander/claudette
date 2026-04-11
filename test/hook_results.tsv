@@ -1,0 +1,97 @@
+prompt	tokens	top_entry	top_score	num_results	latency_ms	expected_match	verdict
+how do goroutines work with channels	goroutines channels	extension-sdk-goroutine-capture-gotcha	4	5	26	extension-sdk-goroutine-capture-gotcha	ok
+goroutine channel buffer deadlock	goroutine channel buffer deadlock	code-concurrency-analysis	5	5	26	extension-sdk-goroutine-capture-gotcha	ok
+Go error handling best practices with fmt.Errorf and %w	go error handling best practices fmt errorf	02-error-handling	14	5	27	02-error-handling	ok
+writing benchmarks in Go with testing.B	writing benchmarks go testing	18-examples	7	5	27		ok
+how does the maps.Keys function work in Go	maps keys function go	maps-keys-returns-iterator-not-slice	15	5	26	maps-keys-returns-iterator-not-slice	ok
+cobra CLI custom args validation friendly error messages	cobra cli custom args validation friendly error messages	cobra-custom-args-validator-friendly-errors	25	5	30	cobra-custom-args-validator-friendly-errors	ok
+multi-module Go repo with cross dependencies	multi-module go repo cross dependencies	multi-module-repo-cross-dependency-elimination	16	5	27	multi-module-repo-cross-dependency-elimination	ok
+submodule tagging strategy for multi-module Go repository	submodule tagging strategy multi-module go repository	multi-module-repo-submodule-tags	13	5	27	multi-module-repo-submodule-tags	ok
+how to avoid getwd race in parallel Go tests	avoid getwd race parallel go tests	chdir-parallel-test-race-getwd	18	5	28	chdir-parallel-test-race-getwd	ok
+io.Writer interface must return original length	io writer interface return original length	bounded-writer-must-return-original-len	21	5	27	bounded-writer-must-return-original-len	ok
+keyword scoring with IDF and bigram matching in Go	keyword scoring idf bigram matching go	lightweight-keyword-search-scoring	14	5	28	lightweight-keyword-search-scoring	ok
+Go context cancellation with goroutines	go context cancellation goroutines	bounded-writer-must-return-original-len	5	5	27		ok
+pgxpool connection pool configuration in Go	pgxpool connection pool configuration go	lang-go-packages	7	5	27		ok
+FastAPI dependency injection and route handlers	fastapi dependency injection route handlers	lang-fastapi-dev	6	5	27		ok
+Django ORM queryset optimization N+1 problem	django orm queryset optimization problem	13-drizzle-orm	6	5	26		ok
+async await Python event loop	async await python event loop	02-gotchas	7	5	27		ok
+pydantic model validation in FastAPI	pydantic model validation fastapi	lang-fastapi-dev	6	5	27		ok
+Python uv package manager pyproject.toml setup	python uv package manager pyproject toml setup	lang-python-dev	10	5	28		ok
+React hooks useState useEffect rendering	react hooks usestate useeffect rendering	03-vercel-ai-hooks	9	5	27		ok
+Svelte 5 runes and reactive state management	svelte runes reactive state management	02-to-svelte-migration	9	5	28		ok
+Tailwind CSS v4 migration from v3 CSS variables	tailwind css v4 migration v3 variables	fe-tailwind-v4	24	5	26		ok
+SvelteKit SSR server side rendering routes	sveltekit ssr server side rendering routes	fe-sveltekit-static	7	5	28		ok
+Next.js App Router server components vs client components	js app router server components vs client	fe-nextjs-app	18	5	28		ok
+CSS grid flexbox layout responsive design	css grid flexbox layout responsive design	design-agent	13	5	27		ok
+Claude Code UserPromptSubmit hook JSON format	claude code userpromptsubmit hook json format	agent-claude-code	11	5	27	hook-reload-session-caching	EXPECTED_MISSING
+hook session caching and reload behavior	hook session caching reload behavior	hook-reload-session-caching	23	5	28	hook-reload-session-caching	ok
+how to write a Claude Code skill	write claude code skill	11-claude-code-router	10	5	27		ok
+plugin binary bootstrap pattern for Claude Code	plugin binary bootstrap pattern claude code	plugin-binary-bootstrap-pattern	28	5	28	plugin-binary-bootstrap-pattern	ok
+parallel agent A/B testing workflow	parallel agent testing workflow	parallel-agent-ab-testing-workflow	19	5	26	parallel-agent-ab-testing-workflow	ok
+Claude Code settings.json hook configuration	claude code settings json hook configuration	agent-claude-code	12	5	28		ok
+agent context window management and token budget	agent context window management token budget	agent-loop-context-window-management	20	5	28	agent-loop-context-window-management	ok
+go formatter hook edit race condition	go formatter hook edit race condition	go-formatter-hook-edit-race	33	5	27	go-formatter-hook-edit-race	ok
+haiku model behavior and capabilities	haiku model behavior capabilities	haiku-model-behavior-patterns	17	5	27	haiku-model-behavior-patterns	ok
+SOLID principles single responsibility violation	solid principles single responsibility violation	01-reusability-principles	6	5	28	detector-first-code-smell-pipeline	EXPECTED_MISSING
+detecting code smells in a pipeline pattern	detecting code smells pipeline pattern	detector-first-code-smell-pipeline	17	5	27	detector-first-code-smell-pipeline	ok
+DRY principle removing duplicated logic	dry principle removing duplicated logic	01-reusability-principles	5	5	27		ok
+extract method refactoring to reduce nesting	extract method refactoring reduce nesting	03-light-touch-refactoring	6	5	27		ok
+technical debt assessment and prioritization	technical debt assessment prioritization	01-assessment	6	5	26		ok
+collapse repeated log lines before truncation	collapse repeated log lines truncation	collapse-repeated-lines-before-truncation	21	5	27	collapse-repeated-lines-before-truncation	ok
+Docker multi-stage build optimization	docker multi-stage build optimization	02-image-optimization	4	5	27		ok
+Kubernetes pod deployment health checks liveness	kubernetes pod deployment health checks liveness	05-deployment	7	5	27		ok
+GitHub Actions workflow with matrix strategy	github actions workflow matrix strategy	ops-github-actions	16	5	29		ok
+CI/CD pipeline caching dependencies	ci cd pipeline caching dependencies	01-ci-cd-integration	13	5	26		ok
+Dockerfile ENTRYPOINT vs CMD difference	dockerfile entrypoint vs cmd difference	dev-tty-existence-vs-openability-macos	5	5	27		ok
+PostgreSQL index selection and query planning	postgresql index selection query planning	01-planning-metrics	5	5	27		ok
+SQLite WAL mode concurrent reads	sqlite wal mode concurrent reads	15-sqlite-production	8	5	28		ok
+Redis pub/sub pattern for real-time updates	redis pub sub pattern real-time updates	06-redis	6	5	27		ok
+database migration rollback strategy	database migration rollback strategy	arch-database-core	5	5	27		ok
+PostgreSQL connection pool exhaustion pgbouncer	postgresql connection pool exhaustion pgbouncer	04-data-access	5	5	27		ok
+LLM prompt engineering techniques for instruction following	llm prompt engineering techniques instruction following	think-prompt-engineer	11	5	26	prompt-ab-testing-what-works	EXPECTED_MISSING
+RAG retrieval augmented generation chunking strategy	rag retrieval augmented generation chunking strategy	ml-rag-retrieval	15	5	28		ok
+embedding models for semantic search similarity	embedding models semantic search similarity	06-semantic-routing	8	5	26		ok
+fine-tuning large language models with LoRA	fine-tuning large language models lora	02-training	5	5	27		ok
+llm as judge evaluation multi-trial calibration	llm judge evaluation multi-trial calibration	llm-as-judge-multi-trial-calibration	22	5	26	llm-as-judge-multi-trial-calibration	ok
+token budget optimization for LLM cost reduction	token budget optimization llm cost reduction	llm-cost-optimization-patterns	15	5	28	llm-cost-optimization-patterns	ok
+GPT-4 nano reasoning token budget	gpt-4 nano reasoning token budget	gpt54-nano-reasoning-token-budget	21	5	27	gpt54-nano-reasoning-token-budget	ok
+LLM provider model namespace collision slash	llm provider model namespace collision slash	llm-provider-model-slash-namespace-collision	36	5	27	llm-provider-model-slash-namespace-collision	ok
+agent loop context window overflow handling	agent loop context window overflow handling	agent-loop-context-window-management	24	5	28	agent-loop-context-window-management	ok
+prompt A/B testing what works and what does not	prompt testing works	prompt-ab-testing-what-works	11	5	26	prompt-ab-testing-what-works	ok
+OpenAI SDK v3 parameter wiring Go client	openai sdk v3 parameter wiring go client	go-sdk-v3-param-wiring	31	5	26	go-sdk-v3-param-wiring	ok
+XSS cross-site scripting prevention sanitization	xss cross-site scripting prevention sanitization	arch-application-security	6	5	26		ok
+CSRF token validation in web applications	csrf token validation web applications	07-quality-validation	6	5	26		ok
+JWT token authentication refresh strategy	jwt token authentication refresh strategy	01-anti-patterns	6	5	26		ok
+OAuth2 PKCE flow for single page applications	oauth2 pkce flow single page applications	arch-application-security	6	5	28		ok
+SQL injection prevention parameterized queries	sql injection prevention parameterized queries	07-command-injection	11	5	27		ok
+piglet extension SDK goroutine variable capture	piglet extension sdk goroutine variable capture	extension-sdk-goroutine-capture-gotcha	37	5	28	extension-sdk-goroutine-capture-gotcha	ok
+testing piglet extensions with jsonrpc protocol	testing piglet extensions jsonrpc protocol	extension-testing-jsonrpc-protocol	24	5	28	extension-testing-jsonrpc-protocol	ok
+zai dual endpoint standard vs coding plan	zai dual endpoint standard vs coding plan	dual-endpoint-standard-vs-coding-plan	38	5	28	dual-endpoint-standard-vs-coding-plan	ok
+zai coding assistant endpoint selection	zai coding assistant endpoint selection	dual-endpoint-standard-vs-coding-plan	12	5	27	dual-endpoint-standard-vs-coding-plan	ok
+error handling Go	error handling go	02-error-handling	10	5	25		ok
+channel goroutine buffer overflow race	channel goroutine buffer overflow race	chdir-parallel-test-race-getwd	8	5	28		ok
+code smell detector pipeline refactoring	code smell detector pipeline refactoring	detector-first-code-smell-pipeline	27	5	28	detector-first-code-smell-pipeline	ok
+dev tty existence openability macOS bash	dev tty existence openability macos bash	dev-tty-existence-vs-openability-macos	34	5	26	dev-tty-existence-vs-openability-macos	ok
+jq safe text replacement bash	jq safe text replacement bash	jq-safe-text-replacement	26	5	26	jq-safe-text-replacement	ok
+the and or but if then else			0	0	23		ok
+is it possible to do this with that	possible		0	0	25		ok
+how do I use this in my project	project		0	2	25		FALSE_POSITIVE
+what is the best way to do it	best		0	2	25		FALSE_POSITIVE
+can you help me with this please	please		0	0	24		ok
+hello	hello		0	0	25		ok
+what time is it	time		0	0	24		ok
+thanks	thanks		0	0	25		ok
+ok got it	ok	11-ok-routing	5	1	24		FALSE_POSITIVE
+looks good	looks		0	0	24		ok
+yes please	yes please		0	0	25		ok
+no			0	0	23		ok
+/help			0	0	0		ok
+/clear			0	0	0		ok
+/commit			0	0	0		ok
+			0	0	0		ok
+x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x...			0	0	24		ok
+fix bug	fix bug	fix-pipeline	5	5	24		ok
+refactor this function please make it cleaner and more readable	refactor function please cleaner readable	04-refactor-constraints	5	5	28		ok
+special chars: <>&"' tab tab {}[]	special chars tab	10-detection-repomixignore-template	4	5	26		ok
+123 456 789 0	123 456 789		0	0	25		ok
+GOROUTINE CHANNEL ERROR HANDLING uppercase	goroutine channel error handling uppercase	02-error-handling	10	5	28		ok
