@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -82,6 +83,26 @@ func addPluginDirs(data []byte, dirs *[]string, seen map[string]struct{}) {
 	}
 }
 
+// walkMdFiles walks all source directories and calls fn for each .md file found.
+func walkMdFiles(dirs []string, fn func(path string, info fs.FileInfo, sourceDir string)) error {
+	for _, dir := range dirs {
+		if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return nil
+			}
+			fn(path, info, dir)
+			return nil
+		}); err != nil {
+			return fmt.Errorf("walking %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
 // Scan walks all source directories and builds entries.
 // Returns entries, max mtime across all files, and total file count.
 func Scan(sourceDirs []string) ([]Entry, time.Time, int, error) {
@@ -89,33 +110,17 @@ func Scan(sourceDirs []string) ([]Entry, time.Time, int, error) {
 	var maxMtime time.Time
 	var fileCount int
 
-	for _, dir := range sourceDirs {
-		filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if d.IsDir() {
-				return nil
-			}
-			if filepath.Ext(path) != ".md" {
-				return nil
-			}
-
-			info, err := d.Info()
-			if err != nil {
-				return nil
-			}
-			fileCount++
-			if info.ModTime().After(maxMtime) {
-				maxMtime = info.ModTime()
-			}
-
-			entry, ok := parseEntry(path, dir)
-			if ok {
-				entries = append(entries, entry)
-			}
-			return nil
-		})
+	if err := walkMdFiles(sourceDirs, func(path string, info fs.FileInfo, sourceDir string) {
+		fileCount++
+		if info.ModTime().After(maxMtime) {
+			maxMtime = info.ModTime()
+		}
+		entry, ok := parseEntry(path, sourceDir)
+		if ok {
+			entries = append(entries, entry)
+		}
+	}); err != nil {
+		return nil, time.Time{}, 0, err
 	}
 
 	return entries, maxMtime, fileCount, nil
@@ -131,31 +136,22 @@ func parseEntry(path, sourceDir string) (Entry, bool) {
 	name := filenameStem(path)
 	title := extractTitle(data)
 	category := extractCategory(path, sourceDir, entryType)
+	var description string
 
-	// For skills/agents/commands, try frontmatter
 	if entryType != TypeKB {
 		fm, _ := ParseFrontmatter(data)
 		if fm.Name != "" {
 			name = fm.Name
 		}
-		if fm.Description != "" && title == "" {
-			title = fm.Description
-		}
-		// Use description for keyword extraction too
 		if fm.Description != "" {
-			keywords := extractKeywords(name, title, category, fm.Description)
-			return Entry{
-				Type:     entryType,
-				Name:     name,
-				Title:    firstNonEmpty(title, fm.Description, name),
-				Category: category,
-				FilePath: path,
-				Keywords: keywords,
-			}, true
+			description = fm.Description
+			if title == "" {
+				title = fm.Description
+			}
 		}
 	}
 
-	keywords := extractKeywords(name, title, category, "")
+	keywords := extractKeywords(name, title, category, description)
 	return Entry{
 		Type:     entryType,
 		Name:     name,
@@ -201,14 +197,19 @@ func classifyType(path, sourceDir string) EntryType {
 
 func extractTitle(data []byte) string {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
+	lineNum := 0
 	inFrontmatter := false
 	for scanner.Scan() {
 		line := scanner.Text()
-		if line == "---" {
-			inFrontmatter = !inFrontmatter
+		lineNum++
+		if lineNum == 1 && line == "---" {
+			inFrontmatter = true
 			continue
 		}
 		if inFrontmatter {
+			if line == "---" {
+				inFrontmatter = false
+			}
 			continue
 		}
 		if strings.HasPrefix(line, "# ") {
@@ -261,13 +262,13 @@ func extractKeywords(name, title, category, description string) []string {
 	// Category itself
 	add(category)
 
-	// From description (first 200 chars for performance)
+	// From description (first 200 runes for performance)
 	if description != "" {
-		desc := description
+		desc := []rune(description)
 		if len(desc) > 200 {
 			desc = desc[:200]
 		}
-		for _, part := range splitWords(desc) {
+		for _, part := range splitWords(string(desc)) {
 			add(part)
 		}
 	}

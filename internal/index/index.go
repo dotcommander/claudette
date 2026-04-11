@@ -94,36 +94,19 @@ func NeedsRebuild(cached Index, sourceDirs []string) bool {
 	var maxMtime time.Time
 	var count int
 
-	for _, dir := range sourceDirs {
-		filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if d.IsDir() {
-				return nil
-			}
-			if filepath.Ext(path) != ".md" {
-				return nil
-			}
-			count++
-			info, err := d.Info()
-			if err != nil {
-				return nil
-			}
-			if info.ModTime().After(maxMtime) {
-				maxMtime = info.ModTime()
-			}
-			return nil
-		})
+	if err := walkMdFiles(sourceDirs, func(_ string, info fs.FileInfo, _ string) {
+		count++
+		if info.ModTime().After(maxMtime) {
+			maxMtime = info.ModTime()
+		}
+	}); err != nil {
+		return true
 	}
 
 	if count != cached.FileCount {
 		return true
 	}
-	if maxMtime.After(cached.SourceMtime) {
-		return true
-	}
-	return false
+	return maxMtime.After(cached.SourceMtime)
 }
 
 // LoadOrRebuild loads the index and rebuilds it if stale.
