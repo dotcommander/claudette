@@ -6,12 +6,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/dotcommander/claudette/internal/index"
 	"github.com/dotcommander/claudette/internal/search"
 )
+
+// errorSignalRe matches lines containing common error signals in tool output.
+// Compiled once at package level to avoid per-call overhead.
+var errorSignalRe = regexp.MustCompile(`(?i)\b(error|fail|panic|undefined|cannot|not found|fatal|FAIL)\b`)
 
 // HookInput matches Claude Code's UserPromptSubmit stdin JSON.
 type HookInput struct {
@@ -60,18 +65,6 @@ func Run() error {
 		return nil
 	}
 
-	sourceDirs, err := index.SourceDirs()
-	if err != nil {
-		status = "skip: source discovery failed"
-		return nil
-	}
-
-	idx, err := index.LoadOrRebuild(sourceDirs)
-	if err != nil {
-		status = "skip: index load failed"
-		return nil
-	}
-
 	stops := search.DefaultStopWords()
 	tokens := search.Tokenize(prompt, stops)
 	if len(tokens) == 0 {
@@ -79,29 +72,52 @@ func Run() error {
 		return nil
 	}
 
-	results := search.ScoreTop(idx.Entries, tokens, search.DefaultThreshold, search.DefaultLimit, idx.IDF)
+	results, status, err := scoreTokens(tokens)
+	if err != nil {
+		return err
+	}
 	if len(results) == 0 {
-		status = fmt.Sprintf("%v -> no matches", tokens)
 		return nil
 	}
-
-	var names []string
-	for _, r := range results {
-		names = append(names, fmt.Sprintf("%s(%d)", r.Entry.Name, r.Score))
-	}
-	status = fmt.Sprintf("%v -> %s", tokens, strings.Join(names, ", "))
-
-	context := formatContext(results)
 
 	resp := HookResponse{
 		HookSpecificOutput: &HookSpecificOutput{
 			HookEventName:     "UserPromptSubmit",
-			AdditionalContext: context,
+			AdditionalContext: formatContext(results),
 		},
 	}
 
 	enc := json.NewEncoder(os.Stdout)
 	return enc.Encode(resp)
+}
+
+// scoreTokens loads (or rebuilds) the index and scores tokens against it.
+// Returns the results, a diagnostic status string, and any hard error.
+// When the result slice is empty the caller should return early; status explains why.
+func scoreTokens(tokens []string) ([]search.ScoredEntry, string, error) {
+	sourceDirs, err := index.SourceDirs()
+	if err != nil {
+		return nil, "skip: source discovery failed", nil
+	}
+
+	idx, err := index.LoadOrRebuild(sourceDirs)
+	if err != nil {
+		return nil, "skip: index load failed", nil
+	}
+
+	hits := search.ScoreTop(idx.Entries, tokens, search.DefaultThreshold, search.DefaultLimit, idx.IDF, idx.AvgFieldLen)
+	if len(hits) == 0 {
+		return nil, fmt.Sprintf("%v -> no matches", tokens), nil
+	}
+	if hits[0].Score < search.DefaultThreshold*search.DefaultConfidenceMultiplier {
+		return nil, fmt.Sprintf("%v -> suppressed (low confidence, top score %d)", tokens, hits[0].Score), nil
+	}
+
+	var names []string
+	for _, r := range hits {
+		names = append(names, fmt.Sprintf("%s(%d)", r.Entry.Name, r.Score))
+	}
+	return hits, fmt.Sprintf("%v -> %s", tokens, strings.Join(names, ", ")), nil
 }
 
 func formatContext(results []search.ScoredEntry) string {
@@ -123,4 +139,88 @@ func relPath(e index.Entry) string {
 		return strings.TrimPrefix(e.FilePath, claudeDir)
 	}
 	return e.FilePath
+}
+
+// PostToolResultInput matches Claude Code's PostToolResult hook stdin JSON.
+type PostToolResultInput struct {
+	ToolName   string `json:"tool_name"`
+	ToolInput  any    `json:"tool_input"`
+	ToolResult any    `json:"tool_result"`
+}
+
+// RunPostToolResult reads PostToolResultInput from stdin, checks for error signals,
+// and surfaces relevant KB entries when the tool result indicates a failure.
+// Successful tool results produce no output, preserving hook performance.
+func RunPostToolResult() error {
+	start := time.Now()
+	var status string
+	defer func() {
+		fmt.Fprintf(os.Stderr, "claudette post-tool-result: %s (%dms)\n", status, time.Since(start).Milliseconds())
+	}()
+
+	data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20)) // 1MB cap
+	if err != nil {
+		status = "stdin error"
+		return err
+	}
+
+	var input PostToolResultInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		status = "skip: malformed input"
+		return nil
+	}
+
+	// Convert ToolResult to a searchable string regardless of its JSON type.
+	var resultText string
+	switch v := input.ToolResult.(type) {
+	case string:
+		resultText = v
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			status = "skip: unserializable tool result"
+			return nil
+		}
+		resultText = string(b)
+	}
+
+	// Only surface on error signals — successful results produce no output.
+	if !errorSignalRe.MatchString(resultText) {
+		status = "skip: no error signal"
+		return nil
+	}
+
+	// Extract lines that contain error signals for focused token extraction.
+	var errorLines []string
+	for _, line := range strings.Split(resultText, "\n") {
+		if errorSignalRe.MatchString(line) {
+			errorLines = append(errorLines, line)
+		}
+	}
+	errorText := strings.Join(errorLines, " ")
+
+	stops := search.DefaultStopWords()
+	tokens := search.Tokenize(errorText, stops)
+	if len(tokens) == 0 {
+		status = "skip: no searchable tokens in error"
+		return nil
+	}
+
+	results, status, err := scoreTokens(tokens)
+	if err != nil {
+		return err
+	}
+	if len(results) == 0 {
+		return nil
+	}
+
+	resp := HookResponse{
+		HookSpecificOutput: &HookSpecificOutput{
+			HookEventName:     "PostToolResult",
+			AdditionalContext: formatContext(results),
+		},
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	return enc.Encode(resp)
 }
