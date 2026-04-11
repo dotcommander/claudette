@@ -1,0 +1,10 @@
+# Compiled binary
+claudette
+*.exe
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
