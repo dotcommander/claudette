@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -202,36 +203,30 @@ func anyToString(v any) string {
 
 // extractErrorTokens filters lines containing error signals and tokenizes them.
 func extractErrorTokens(text string) []string {
-	var errorLines []string
+	var b strings.Builder
 	for _, line := range strings.Split(text, "\n") {
 		if errorSignalRe.MatchString(line) {
-			errorLines = append(errorLines, line)
+			if b.Len() > 0 {
+				b.WriteByte(' ')
+			}
+			b.WriteString(line)
 		}
 	}
-	return search.Tokenize(strings.Join(errorLines, " "), search.DefaultStopWords())
+	return search.Tokenize(b.String(), search.DefaultStopWords())
 }
 
 func formatContext(results []search.ScoredEntry, mode string) string {
 	var b strings.Builder
 	b.WriteString("<related_skills_knowledge>\nScan first 10 lines of each file. Only read full files that are clearly relevant.\n")
-	if mode == "compact" {
-		for _, r := range results {
-			desc := r.Entry.Desc
-			if desc == "" {
-				desc = r.Entry.Title
-			}
-			fmt.Fprintf(&b, "\n  %s — %s", r.Entry.Name, desc)
-			if len(r.Matched) > 0 {
-				fmt.Fprintf(&b, " [matched: %s]", strings.Join(r.Matched, ", "))
-			}
-		}
-	} else {
-		prefix := homePrefix()
-		for _, r := range results {
+	prefix := homePrefix()
+	for _, r := range results {
+		if mode == "compact" {
+			fmt.Fprintf(&b, "\n  %s — %s", r.Entry.Name, cmp.Or(r.Entry.Desc, r.Entry.Title))
+		} else {
 			fmt.Fprintf(&b, "\n  %s — %s", trimHome(r.Entry.FilePath, prefix), r.Entry.Title)
-			if len(r.Matched) > 0 {
-				fmt.Fprintf(&b, " [matched: %s]", strings.Join(r.Matched, ", "))
-			}
+		}
+		if len(r.Matched) > 0 {
+			fmt.Fprintf(&b, " [matched: %s]", strings.Join(r.Matched, ", "))
 		}
 	}
 	b.WriteString("\n</related_skills_knowledge>")
