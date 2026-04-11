@@ -32,7 +32,7 @@ go vet ./...                        # static analysis
 - `cmd/claudette/main.go` — entry point, hooks bypass cobra for speed
 - `internal/index/` — entry types, filesystem scanning, index caching
 - `internal/search/` — tokenizer, scorer, aliases
-- `internal/hook/` — UserPromptSubmit and PostToolResult hook protocol
+- `internal/hook/` — UserPromptSubmit and PostToolUse hook protocol
 - `internal/output/` — text and JSON formatters
 
 ## Reporting Issues

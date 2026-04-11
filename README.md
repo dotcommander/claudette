@@ -27,7 +27,7 @@ This works for errors too. A test fails with `undefined: NewRouter` — claudett
 Claudette runs as a [Claude Code hook](https://docs.anthropic.com/en/docs/claude-code/hooks) — invisible infrastructure that fires on every prompt:
 
 1. **UserPromptSubmit** — scores your prompt against indexed entries and surfaces the top matches. Runs in under 50ms.
-2. **PostToolResult** — watches for error signals (build failures, test errors, panics) and surfaces relevant KB entries when things break.
+2. **PostToolUse** — watches for error signals (build failures, test errors, panics) and surfaces relevant KB entries when things break.
 
 `claudette init` wires both hooks into `~/.claude/settings.json` and builds the index. It's idempotent — safe to re-run anytime.
 
