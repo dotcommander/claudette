@@ -1,13 +1,18 @@
 # Compiled binary
 /claudette
 *.exe
+*.test
 
 # IDE
 .idea/
 .vscode/
+*.swp
+*.swo
 
-# Test outputs
-test/hook_results.tsv
+# Test and profile outputs
+*.out
+*.prof
+test/*.tsv
 
 # OS
 .DS_Store

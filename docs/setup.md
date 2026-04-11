@@ -8,8 +8,7 @@
 ## Install
 
 ```bash
-cd ~/go/src/claudette
-go install ./cmd/claudette/
+go install github.com/dotcommander/claudette/cmd/claudette@latest
 ```
 
 This places the binary at `~/go/bin/claudette`. Verify:
@@ -36,14 +35,29 @@ Add claudette as a `UserPromptSubmit` hook in `~/.claude/settings.json`. Find (o
   "hooks": [
     {
       "type": "command",
-      "command": "/Users/YOUR_USERNAME/go/bin/claudette hook",
+      "command": "claudette hook",
       "timeout": 3000
     }
   ]
 }
 ```
 
-Replace `YOUR_USERNAME` with your actual username, or use the full path from `which claudette`.
+To also surface KB entries when tool calls fail, add a `PostToolResult` hook:
+
+```json
+{
+  "matcher": "",
+  "hooks": [
+    {
+      "type": "command",
+      "command": "claudette post-tool-result",
+      "timeout": 3000
+    }
+  ]
+}
+```
+
+If `claudette` is not on your PATH, use the full path from `which claudette` in the `command` field.
 
 If you already have a `UserPromptSubmit` hook entry (e.g., a dc plugin hook), add claudette as a second entry in the array — both will fire.
 
@@ -101,19 +115,7 @@ claudette search --threshold 3 "prompt"   # Stricter matching
 After pulling changes:
 
 ```bash
-cd ~/go/src/claudette
-go install ./cmd/claudette/
+go install github.com/dotcommander/claudette/cmd/claudette@latest
 ```
 
 The hook picks up the new binary immediately — no settings.json changes needed.
-
-## Removing the Old Hook
-
-If you previously used `kb-lookup.sh`, remove or replace its entry in `settings.json`:
-
-```diff
-- "command": "/Users/YOUR_USERNAME/.claude/hooks/kb-lookup.sh",
-+ "command": "/Users/YOUR_USERNAME/go/bin/claudette hook",
-```
-
-The bash script can be deleted — claudette is a strict superset (covers KB + skills + agents + commands, 40x faster).
