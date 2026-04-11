@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"math"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -27,11 +26,7 @@ type Index struct {
 
 // IndexPath returns ~/.config/claudette/index.json.
 func IndexPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "claudette", "index.json"), nil
+	return configFilePath("index.json")
 }
 
 // Load reads the index from disk. Returns os.ErrNotExist if missing.
@@ -57,36 +52,40 @@ func Save(idx Index) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-
 	data, err := json.MarshalIndent(idx, "", "  ")
 	if err != nil {
 		return err
 	}
+	return writeJSONFile(path, data)
+}
 
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".claudette-index-*.json")
+// buildIndex scans source directories and constructs a fresh Index.
+func buildIndex(sourceDirs []string) (Index, error) {
+	entries, maxMtime, fileCount, err := Scan(sourceDirs)
 	if err != nil {
-		return err
+		return Index{}, fmt.Errorf("scan failed: %w", err)
 	}
-	tmpPath := tmp.Name()
+	return Index{
+		Version:     CurrentVersion,
+		BuildTime:   time.Now(),
+		SourceMtime: maxMtime,
+		FileCount:   fileCount,
+		Entries:     entries,
+		IDF:         ComputeIDF(entries),
+		AvgFieldLen: ComputeAvgFieldLen(entries),
+	}, nil
+}
 
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return err
+// ForceRebuild scans, builds, and persists a fresh index unconditionally.
+func ForceRebuild(sourceDirs []string) (Index, error) {
+	idx, err := buildIndex(sourceDirs)
+	if err != nil {
+		return Index{}, err
 	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return err
+	if err := Save(idx); err != nil {
+		return Index{}, fmt.Errorf("saving index: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	return idx, nil
 }
 
 // NeedsRebuild checks whether the cached index is stale relative to source dirs.
@@ -163,19 +162,9 @@ func LoadOrRebuild(sourceDirs []string) (Index, error) {
 		return cached, nil
 	}
 
-	entries, maxMtime, fileCount, scanErr := Scan(sourceDirs)
-	if scanErr != nil {
-		return Index{}, fmt.Errorf("scan failed: %w", scanErr)
-	}
-
-	idx := Index{
-		Version:     CurrentVersion,
-		BuildTime:   time.Now(),
-		SourceMtime: maxMtime,
-		FileCount:   fileCount,
-		Entries:     entries,
-		IDF:         ComputeIDF(entries),
-		AvgFieldLen: ComputeAvgFieldLen(entries),
+	idx, err := buildIndex(sourceDirs)
+	if err != nil {
+		return Index{}, err
 	}
 
 	// Compact usage log into entry hit counts.

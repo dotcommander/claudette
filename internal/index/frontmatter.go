@@ -18,9 +18,6 @@ var fmDelimiter = []byte("---\n")
 // ParseFrontmatter extracts YAML between --- delimiters.
 // Returns zero Frontmatter if no valid frontmatter found.
 func ParseFrontmatter(content []byte) (Frontmatter, error) {
-	if bytes.IndexByte(content, '\r') >= 0 {
-		content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
-	}
 	if !bytes.HasPrefix(content, fmDelimiter) {
 		return Frontmatter{}, nil
 	}

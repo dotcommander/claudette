@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 
@@ -61,6 +62,7 @@ func rootCmd() *cobra.Command {
 		searchCmd(&format, &threshold, &limit, "kb"),
 		searchCmd(&format, &threshold, &limit, "skill"),
 		scanCmd(),
+		initCmd(),
 		versionCmd(),
 	)
 
@@ -133,27 +135,9 @@ func scanCmd() *cobra.Command {
 		Use:   "scan",
 		Short: "Rebuild the component index",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			sourceDirs, err := index.SourceDirs()
+			entries, err := rebuildIndex()
 			if err != nil {
-				return fmt.Errorf("discovering sources: %w", err)
-			}
-
-			entries, maxMtime, fileCount, err := index.Scan(sourceDirs)
-			if err != nil {
-				return fmt.Errorf("scan failed: %w", err)
-			}
-
-			idx := index.Index{
-				Version:     index.CurrentVersion,
-				BuildTime:   maxMtime,
-				SourceMtime: maxMtime,
-				FileCount:   fileCount,
-				Entries:     entries,
-				IDF:         index.ComputeIDF(entries),
-				AvgFieldLen: index.ComputeAvgFieldLen(entries),
-			}
-			if err := index.Save(idx); err != nil {
-				return fmt.Errorf("saving index: %w", err)
+				return err
 			}
 
 			counts := make(map[string]int)
@@ -164,6 +148,94 @@ func scanCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// rebuildIndex discovers sources, scans, and saves the index.
+func rebuildIndex() ([]index.Entry, error) {
+	sourceDirs, err := index.SourceDirs()
+	if err != nil {
+		return nil, fmt.Errorf("discovering sources: %w", err)
+	}
+	idx, err := index.ForceRebuild(sourceDirs)
+	if err != nil {
+		return nil, err
+	}
+	return idx.Entries, nil
+}
+
+func initCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "init",
+		Short: "Wire hooks into Claude Code and build the initial index",
+		Long:  "Registers claudette as a UserPromptSubmit and PostToolResult hook in ~/.claude/settings.json, writes default config, and runs the first scan. Safe to re-run — idempotent.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runInit()
+		},
+	}
+}
+
+func runInit() error {
+	binPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolving binary path: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(binPath); err == nil {
+		binPath = resolved
+	}
+
+	// Wire hooks into Claude Code settings.
+	settings, err := index.ReadClaudeSettings()
+	if err != nil {
+		return fmt.Errorf("reading settings: %w", err)
+	}
+
+	hookCmd := binPath + " hook"
+	postCmd := binPath + " post-tool-result"
+
+	wired1 := index.UpsertHookEntry(settings, "UserPromptSubmit", hookCmd, "claudette")
+	wired2 := index.UpsertHookEntry(settings, "PostToolResult", postCmd, "claudette")
+
+	if wired1 || wired2 {
+		if err := index.WriteClaudeSettings(settings); err != nil {
+			return fmt.Errorf("writing settings: %w", err)
+		}
+		if wired1 {
+			fmt.Fprintf(os.Stdout, "Wired UserPromptSubmit hook -> %s\n", hookCmd)
+		}
+		if wired2 {
+			fmt.Fprintf(os.Stdout, "Wired PostToolResult hook -> %s\n", postCmd)
+		}
+	} else {
+		fmt.Fprintln(os.Stdout, "Hooks already wired.")
+	}
+
+	// Write default config if missing.
+	cfg, err := index.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	if len(cfg.SourceDirs) == 0 {
+		defaults, err := index.DefaultSourceDirs()
+		if err != nil {
+			return fmt.Errorf("resolving default dirs: %w", err)
+		}
+		cfg.SourceDirs = defaults
+		if err := index.SaveConfig(cfg); err != nil {
+			return fmt.Errorf("saving config: %w", err)
+		}
+		configPath, _ := index.ConfigPath()
+		fmt.Fprintf(os.Stdout, "Config written to %s\n", configPath)
+	}
+
+	// Run initial scan.
+	entries, err := rebuildIndex()
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stdout, "Index built: %d entries cached\n", len(entries))
+	fmt.Fprintln(os.Stdout, "Ready — hooks active on next Claude Code session.")
+	return nil
 }
 
 func versionCmd() *cobra.Command {

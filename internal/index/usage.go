@@ -20,11 +20,7 @@ type UsageRecord struct {
 
 // UsageLogPath returns ~/.config/claudette/usage.log.
 func UsageLogPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "claudette", "usage.log"), nil
+	return configFilePath("usage.log")
 }
 
 // AppendUsageLog opens the log in append mode and writes one TSV line per record.
