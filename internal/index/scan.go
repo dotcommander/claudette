@@ -155,7 +155,7 @@ func parseEntry(path, sourceDir string) (Entry, bool) {
 		}
 	}
 
-	body := bodyContent(data, 500)
+	body := bodyContentSections(data, 500)
 	keywords := extractKeywords(name, title, category, description, tags, body)
 
 	// Add trigger words at weight 2
@@ -314,11 +314,29 @@ func truncateRunes(s string, n int) string {
 	return s
 }
 
-// bodyContent returns the first maxRunes runes of content after frontmatter.
-func bodyContent(data []byte, maxRunes int) string {
+// prioritySectionKeywords are header substrings (lowercased) that indicate
+// high-signal sections worth surfacing before generic preamble.
+var prioritySectionKeywords = []string{
+	"trigger", "when to use", "use when", "use proactively",
+	"quick reference", "usage", "overview",
+	"description", "what", "how",
+}
+
+// bodyContentSections returns up to maxRunes runes of body content, preferring
+// sections whose headers contain high-signal keywords (trigger phrases, usage,
+// overview, etc.) over generic preamble prose.
+//
+// Algorithm:
+//  1. Strip YAML frontmatter.
+//  2. Split by markdown section headers (## / ###).
+//  3. Rank sections: priority headers first, then the rest in document order.
+//  4. Concatenate and truncate to maxRunes.
+func bodyContentSections(data []byte, maxRunes int) string {
 	if bytes.IndexByte(data, '\r') >= 0 {
 		data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 	}
+
+	// Strip frontmatter.
 	body := data
 	if bytes.HasPrefix(data, []byte("---\n")) {
 		rest := data[4:]
@@ -326,7 +344,63 @@ func bodyContent(data []byte, maxRunes int) string {
 			body = rest[end+4:]
 		}
 	}
-	runes := []rune(string(body))
+
+	text := string(body)
+	lines := strings.Split(text, "\n")
+
+	// Split into sections. A section is [header line, ...body lines].
+	// Index 0 holds everything before the first ## / ### header.
+	type section struct {
+		header string // lowercased header text (empty for pre-header content)
+		body   string
+	}
+
+	var sections []section
+	var cur strings.Builder
+	curHeader := ""
+
+	flush := func(nextHeader string) {
+		sections = append(sections, section{header: curHeader, body: cur.String()})
+		cur.Reset()
+		curHeader = nextHeader
+	}
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "### ") {
+			flush(strings.ToLower(strings.TrimLeft(line, "# ")))
+		} else {
+			cur.WriteString(line)
+			cur.WriteByte('\n')
+		}
+	}
+	flush("") // flush last section
+
+	// Partition into priority and fallback.
+	isPriority := func(header string) bool {
+		for _, kw := range prioritySectionKeywords {
+			if strings.Contains(header, kw) {
+				return true
+			}
+		}
+		return false
+	}
+
+	var priority, fallback []string
+	for _, s := range sections {
+		if isPriority(s.header) {
+			priority = append(priority, s.body)
+		} else {
+			fallback = append(fallback, s.body)
+		}
+	}
+
+	// Concatenate: priority sections first, then fallback.
+	var sb strings.Builder
+	for _, part := range append(priority, fallback...) {
+		sb.WriteString(part)
+	}
+
+	runes := []rune(sb.String())
 	if len(runes) > maxRunes {
 		runes = runes[:maxRunes]
 	}
