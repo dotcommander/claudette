@@ -82,8 +82,8 @@ Add extra directories to index team-wide skill repos or project-specific knowled
 ## Documentation
 
 - [Setup & Installation](docs/setup.md)
-- [Contributing](docs/CONTRIBUTING.md)
-- [Changelog](docs/CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
 
 ## License
 
