@@ -44,8 +44,8 @@ func rootCmd() *cobra.Command {
 	}
 
 	root.PersistentFlags().StringVar(&format, "format", "text", "Output format: text or json")
-	root.PersistentFlags().IntVar(&threshold, "threshold", 2, "Minimum score to include in results")
-	root.PersistentFlags().IntVar(&limit, "limit", 5, "Maximum number of results")
+	root.PersistentFlags().IntVar(&threshold, "threshold", search.DefaultThreshold, "Minimum score to include in results")
+	root.PersistentFlags().IntVar(&limit, "limit", search.DefaultLimit, "Maximum number of results")
 
 	root.AddCommand(
 		searchCmd(&format, &threshold, &limit, ""),
@@ -100,6 +100,8 @@ func runSearch(prompt, format string, threshold, limit int, filter string) error
 			t = index.TypeAgent
 		case "command":
 			t = index.TypeCommand
+		default:
+			return fmt.Errorf("unknown filter type: %q", filter)
 		}
 		entries = search.FilterByType(entries, t)
 	}

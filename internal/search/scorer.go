@@ -1,7 +1,8 @@
 package search
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"strings"
 
 	"github.com/dotcommander/claudette/internal/index"
@@ -24,35 +25,30 @@ func Score(entries []index.Entry, tokens []string, threshold int) []ScoredEntry 
 	var results []ScoredEntry
 
 	for _, entry := range entries {
-		kwSet := make(map[string]struct{}, len(entry.Keywords))
-		for _, kw := range entry.Keywords {
-			kwSet[kw] = struct{}{}
-		}
-
 		score := 0
 		var matched []string
 
 		for _, tok := range tokens {
 			// Category alias boost: +2
-			if canonical, ok := CategoryAliases[tok]; ok && canonical == entry.Category {
+			if canonical, ok := CategoryAlias(tok); ok && canonical == entry.Category {
 				score += 2
 				matched = append(matched, tok)
 			}
 
 			// Direct keyword match: +1
-			if _, ok := kwSet[tok]; ok {
+			if slices.Contains(entry.Keywords, tok) {
 				score++
 				matched = append(matched, tok)
 				continue
 			}
 			// Plural normalization
-			if _, ok := kwSet[tok+"s"]; ok {
+			if slices.Contains(entry.Keywords, tok+"s") {
 				score++
 				matched = append(matched, tok)
 				continue
 			}
 			if s, ok := strings.CutSuffix(tok, "s"); ok {
-				if _, ok := kwSet[s]; ok {
+				if slices.Contains(entry.Keywords, s) {
 					score++
 					matched = append(matched, tok)
 				}
@@ -68,11 +64,11 @@ func Score(entries []index.Entry, tokens []string, threshold int) []ScoredEntry 
 		}
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		if results[i].Score != results[j].Score {
-			return results[i].Score > results[j].Score
+	slices.SortFunc(results, func(a, b ScoredEntry) int {
+		if a.Score != b.Score {
+			return cmp.Compare(b.Score, a.Score) // descending
 		}
-		return results[i].Entry.Name < results[j].Entry.Name
+		return cmp.Compare(a.Entry.Name, b.Entry.Name)
 	})
 
 	return results

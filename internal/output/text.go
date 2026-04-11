@@ -3,6 +3,8 @@ package output
 import (
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/dotcommander/claudette/internal/search"
@@ -28,7 +30,7 @@ func WriteText(w io.Writer, results []search.ScoredEntry) {
 // WriteScanSummary formats scan results as a summary.
 func WriteScanSummary(w io.Writer, counts map[string]int, total int) {
 	fmt.Fprintf(w, "Indexed %d entries:\n", total)
-	for label, count := range counts {
-		fmt.Fprintf(w, "  %-10s %d\n", label, count)
+	for _, label := range slices.Sorted(maps.Keys(counts)) {
+		fmt.Fprintf(w, "  %-10s %d\n", label, counts[label])
 	}
 }

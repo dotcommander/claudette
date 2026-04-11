@@ -1,8 +1,8 @@
 package search
 
-// CategoryAliases maps alternative names to canonical category names.
+// categoryAliases maps alternative names to canonical category names.
 // Used to boost scoring when a prompt token matches a category synonym.
-var CategoryAliases = map[string]string{
+var categoryAliases = map[string]string{
 	"golang":     "go",
 	"goroutine":  "go",
 	"goroutines": "go",
@@ -23,4 +23,10 @@ var CategoryAliases = map[string]string{
 	"script":     "bash",
 	"scripting":  "bash",
 	"zsh":        "bash",
+}
+
+// CategoryAlias returns the canonical category for a token alias, if one exists.
+func CategoryAlias(token string) (string, bool) {
+	cat, ok := categoryAliases[token]
+	return cat, ok
 }

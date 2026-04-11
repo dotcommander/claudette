@@ -2,6 +2,7 @@ package search
 
 import (
 	"strings"
+	"sync"
 	"unicode"
 )
 
@@ -14,36 +15,43 @@ func (s StopSet) Contains(word string) bool {
 	return ok
 }
 
+var (
+	defaultStops     StopSet
+	defaultStopsOnce sync.Once
+)
+
 // DefaultStopWords returns the built-in stop word list.
 func DefaultStopWords() StopSet {
-	words := []string{
-		"a", "an", "the", "and", "or", "but", "if", "in", "on", "at",
-		"to", "for", "of", "by", "is", "it", "be", "as", "do", "we",
-		"so", "no", "up", "he", "me", "my", "am", "go",
-		"all", "any", "are", "can", "did", "get", "got", "had", "has",
-		"have", "her", "him", "his", "how", "its", "let", "may", "not",
-		"now", "old", "our", "out", "own", "run", "say", "she", "too",
-		"use", "was", "way", "who", "why", "you",
-		"about", "after", "also", "back", "been", "call", "come",
-		"could", "does", "down", "each", "else", "even", "every",
-		"find", "from", "give", "good", "great", "help", "here",
-		"into", "just", "keep", "know", "like", "long", "look",
-		"made", "make", "many", "more", "most", "much", "must",
-		"need", "next", "only", "over", "part", "same", "should",
-		"show", "some", "such", "sure", "take", "tell", "than",
-		"that", "them", "then", "there", "these", "they", "this",
-		"very", "want", "well", "were", "what", "when", "where",
-		"which", "will", "with", "work", "would", "yeah", "your",
-		"about", "before", "being", "between", "check", "doing",
-		"don", "going", "gonna", "never", "often", "other",
-		"really", "something", "still", "stuff", "thing", "things",
-		"think", "those", "under", "while",
-	}
-	set := make(StopSet, len(words))
-	for _, w := range words {
-		set[w] = struct{}{}
-	}
-	return set
+	defaultStopsOnce.Do(func() {
+		words := []string{
+			"a", "an", "the", "and", "or", "but", "if", "in", "on", "at",
+			"to", "for", "of", "by", "is", "it", "be", "as", "do", "we",
+			"so", "no", "up", "he", "me", "my", "am",
+			"all", "any", "are", "can", "did", "get", "got", "had", "has",
+			"have", "her", "him", "his", "how", "its", "let", "may", "not",
+			"now", "old", "our", "out", "own", "run", "say", "she", "too",
+			"use", "was", "way", "who", "why", "you",
+			"about", "after", "also", "back", "been", "call", "come",
+			"could", "does", "down", "each", "else", "even", "every",
+			"find", "from", "give", "good", "great", "help", "here",
+			"into", "just", "keep", "know", "like", "long", "look",
+			"made", "make", "many", "more", "most", "much", "must",
+			"need", "next", "only", "over", "part", "same", "should",
+			"show", "some", "such", "sure", "take", "tell", "than",
+			"that", "them", "then", "there", "these", "they", "this",
+			"very", "want", "well", "were", "what", "when", "where",
+			"which", "will", "with", "work", "would", "yeah", "your",
+			"before", "being", "between", "check", "doing",
+			"don", "going", "gonna", "never", "often", "other",
+			"really", "something", "still", "stuff", "thing", "things",
+			"think", "those", "under", "while",
+		}
+		defaultStops = make(StopSet, len(words))
+		for _, w := range words {
+			defaultStops[w] = struct{}{}
+		}
+	})
+	return defaultStops
 }
 
 // Tokenize lowercases the input, splits on non-alphanumeric boundaries

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/dotcommander/claudette/internal/index"
 	"github.com/dotcommander/claudette/internal/search"
@@ -27,49 +29,67 @@ type HookSpecificOutput struct {
 	AdditionalContext string `json:"additionalContext,omitempty"`
 }
 
-const (
-	defaultThreshold = 2
-	defaultLimit     = 5
-)
-
 // Run reads HookInput from stdin, scores entries, writes context to stdout.
-// Silent exit (no output) when nothing matches.
+// Logs diagnostics to stderr for visibility during Claude Code sessions.
 func Run() error {
+	start := time.Now()
+	var status string
+	defer func() {
+		fmt.Fprintf(os.Stderr, "claudette: %s (%dms)\n", status, time.Since(start).Milliseconds())
+	}()
+
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20)) // 1MB cap
 	if err != nil {
+		status = "stdin error"
 		return err
 	}
 
 	var input HookInput
 	if err := json.Unmarshal(data, &input); err != nil {
-		return nil // Malformed input: exit silently
+		status = "skip: malformed input"
+		return nil
 	}
 
 	prompt := strings.TrimSpace(input.Prompt)
-	if prompt == "" || strings.HasPrefix(prompt, "/") {
+	if prompt == "" {
+		status = "skip: empty prompt"
+		return nil
+	}
+	if strings.HasPrefix(prompt, "/") {
+		status = "skip: slash command"
 		return nil
 	}
 
 	sourceDirs, err := index.SourceDirs()
 	if err != nil {
-		return nil // Can't discover dirs: exit silently
+		status = "skip: source discovery failed"
+		return nil
 	}
 
 	idx, err := index.LoadOrRebuild(sourceDirs)
 	if err != nil {
-		return nil // Index failure: exit silently
+		status = "skip: index load failed"
+		return nil
 	}
 
 	stops := search.DefaultStopWords()
 	tokens := search.Tokenize(prompt, stops)
 	if len(tokens) == 0 {
+		status = "skip: no searchable tokens"
 		return nil
 	}
 
-	results := search.ScoreTop(idx.Entries, tokens, defaultThreshold, defaultLimit)
+	results := search.ScoreTop(idx.Entries, tokens, search.DefaultThreshold, search.DefaultLimit)
 	if len(results) == 0 {
+		status = fmt.Sprintf("%v -> no matches", tokens)
 		return nil
 	}
+
+	var names []string
+	for _, r := range results {
+		names = append(names, fmt.Sprintf("%s(%d)", r.Entry.Name, r.Score))
+	}
+	status = fmt.Sprintf("%v -> %s", tokens, strings.Join(names, ", "))
 
 	context := formatContext(results)
 
@@ -86,20 +106,19 @@ func Run() error {
 
 func formatContext(results []search.ScoredEntry) string {
 	var b strings.Builder
-	b.WriteString("Relevant knowledge base entries \u2014 read before proceeding:")
+	b.WriteString("Relevant knowledge base entries — read before proceeding:")
 	for _, r := range results {
-		fmt.Fprintf(&b, "\n  %s \u2014 %s", relPath(r.Entry), r.Entry.Title)
+		fmt.Fprintf(&b, "\n  %s — %s", relPath(r.Entry), r.Entry.Title)
 	}
 	return b.String()
 }
 
 func relPath(e index.Entry) string {
-	// Show path relative to ~/.claude/ for readability
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return e.FilePath
 	}
-	claudeDir := home + "/.claude/"
+	claudeDir := filepath.Join(home, ".claude") + string(os.PathSeparator)
 	if strings.HasPrefix(e.FilePath, claudeDir) {
 		return strings.TrimPrefix(e.FilePath, claudeDir)
 	}
