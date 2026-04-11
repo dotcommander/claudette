@@ -8,30 +8,31 @@ import (
 )
 
 // atomicWriteFile writes data to path via temp-file-then-rename.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+func atomicWriteFile(path string, data []byte, perm os.FileMode) (retErr error) {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".claudette-tmp-*")
 	if err != nil {
 		return err
 	}
 	tmpPath := tmp.Name()
+	defer func() {
+		if retErr != nil {
+			os.Remove(tmpPath)
+		}
+	}()
 
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		os.Remove(tmpPath)
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
-		os.Remove(tmpPath)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
 		return err
 	}
 	if err := os.Chmod(tmpPath, perm); err != nil {
-		os.Remove(tmpPath)
 		return err
 	}
 	return os.Rename(tmpPath, path)

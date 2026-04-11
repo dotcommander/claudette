@@ -13,13 +13,31 @@ import (
 const hookTimeoutMs = 3000
 
 // validHookEvents is the set of hook event names recognised by Claude Code.
+// Source: /doctor output + https://code.claude.com/docs/en/hooks
 var validHookEvents = map[string]struct{}{
-	"PreToolUse":       {},
-	"PostToolUse":      {},
-	"UserPromptSubmit": {},
-	"Stop":             {},
-	"Notification":     {},
-	"SubagentStop":     {},
+	"PreToolUse":         {},
+	"PostToolUse":        {},
+	"PostToolUseFailure": {},
+	"UserPromptSubmit":   {},
+	"Stop":               {},
+	"SessionStart":       {},
+	"SessionEnd":         {},
+	"PreCompact":         {},
+	"PostCompact":        {},
+	"PermissionRequest":  {},
+	"PermissionDenied":   {},
+	"Notification":       {},
+	"SubagentStop":       {},
+	"Setup":              {},
+	"TeammateIdle":       {},
+	"TaskCreated":        {},
+	"TaskCompleted":      {},
+	"Elicitation":        {},
+	"ElicitationResult":  {},
+	"ConfigChange":       {},
+	"ExtensionsLoaded":   {},
+	"CwdChanged":         {},
+	"FileChanged":        {},
 }
 
 // ClaudeSettingsPath returns the path to Claude Code's settings.json.
@@ -77,7 +95,7 @@ func WriteClaudeSettings(settings map[string]any) error {
 // Returns an error if the event name is not a valid Claude Code hook event.
 func UpsertHookEntry(settings map[string]any, event, command string, identifier string) (bool, error) {
 	if _, ok := validHookEvents[event]; !ok {
-		return false, fmt.Errorf("invalid hook event %q: valid events are PreToolUse, PostToolUse, UserPromptSubmit, Stop, Notification, SubagentStop", event)
+		return false, fmt.Errorf("invalid hook event %q: see https://code.claude.com/docs/en/hooks for valid events", event)
 	}
 
 	hooksMap, ok := settings["hooks"].(map[string]any)

@@ -16,21 +16,23 @@ import (
 
 var version = "dev"
 
+// filterTypes maps CLI filter names to index entry types.
+var filterTypes = map[string]index.EntryType{
+	"kb":      index.TypeKB,
+	"skill":   index.TypeSkill,
+	"agent":   index.TypeAgent,
+	"command": index.TypeCommand,
+}
+
 func main() {
-	// Fast path: bypass cobra entirely for hot code paths.
+	// Fast path: bypass cobra for hook latency (<50ms target).
 	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "hook":
-			if err := hook.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "claudette hook: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		case "post-tool-use":
-			if err := hook.RunPostToolUse(); err != nil {
-				fmt.Fprintf(os.Stderr, "claudette post-tool-use: %v\n", err)
-				os.Exit(1)
-			}
+		handled, err := fastPath(os.Args[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "claudette %s: %v\n", os.Args[1], err)
+			os.Exit(1)
+		}
+		if handled {
 			return
 		}
 	}
@@ -40,27 +42,35 @@ func main() {
 	}
 }
 
+// fastPath handles hot-path subcommands without cobra overhead.
+// Returns (true, nil) on success, (true, err) on failure,
+// or (false, nil) for commands that should fall through to cobra.
+func fastPath(cmd string) (bool, error) {
+	switch cmd {
+	case "hook":
+		return true, hook.Run()
+	case "post-tool-use":
+		return true, hook.RunPostToolUse()
+	}
+	return false, nil
+}
+
 func rootCmd() *cobra.Command {
-	var (
-		format    string
-		threshold int
-		limit     int
-	)
+	var opts searchOpts
 
 	root := &cobra.Command{
 		Use:   "claudette",
 		Short: "Knowledge and skill discovery for Claude Code",
-		Long:  "Lightweight CLI that surfaces relevant knowledge base entries, skills, agents, and commands for Claude Code.",
 	}
 
-	root.PersistentFlags().StringVar(&format, "format", "text", "Output format: text or json")
-	root.PersistentFlags().IntVar(&threshold, "threshold", search.DefaultThreshold, "Minimum score to include in results")
-	root.PersistentFlags().IntVar(&limit, "limit", search.DefaultLimit, "Maximum number of results")
+	root.PersistentFlags().StringVar(&opts.format, "format", "text", "Output format: text or json")
+	root.PersistentFlags().IntVar(&opts.threshold, "threshold", search.DefaultThreshold, "Minimum score to include in results")
+	root.PersistentFlags().IntVar(&opts.limit, "limit", search.DefaultLimit, "Maximum number of results")
 
 	root.AddCommand(
-		searchCmd(&format, &threshold, &limit, ""),
-		searchCmd(&format, &threshold, &limit, "kb"),
-		searchCmd(&format, &threshold, &limit, "skill"),
+		newSearchCmd(&opts, ""),
+		newSearchCmd(&opts, "kb"),
+		newSearchCmd(&opts, "skill"),
 		scanCmd(),
 		initCmd(),
 		versionCmd(),
@@ -69,7 +79,13 @@ func rootCmd() *cobra.Command {
 	return root
 }
 
-func searchCmd(format *string, threshold, limit *int, filter string) *cobra.Command {
+type searchOpts struct {
+	format    string
+	threshold int
+	limit     int
+}
+
+func newSearchCmd(opts *searchOpts, filter string) *cobra.Command {
 	use := "search"
 	short := "Search all entries (KB, skills, agents, commands)"
 	if filter != "" {
@@ -82,46 +98,30 @@ func searchCmd(format *string, threshold, limit *int, filter string) *cobra.Comm
 		Short: short,
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			prompt := strings.Join(args, " ")
-			return runSearch(prompt, *format, *threshold, *limit, filter)
+			return runSearch(strings.Join(args, " "), filter, opts)
 		},
 	}
 }
 
-func runSearch(prompt, format string, threshold, limit int, filter string) error {
-	sourceDirs, err := index.SourceDirs()
+func runSearch(prompt, filter string, opts *searchOpts) error {
+	idx, err := loadIndex()
 	if err != nil {
-		return fmt.Errorf("discovering sources: %w", err)
-	}
-
-	idx, err := index.LoadOrRebuild(sourceDirs)
-	if err != nil {
-		return fmt.Errorf("loading index: %w", err)
+		return err
 	}
 
 	entries := idx.Entries
 	if filter != "" {
-		var t index.EntryType
-		switch filter {
-		case "kb":
-			t = index.TypeKB
-		case "skill":
-			t = index.TypeSkill
-		case "agent":
-			t = index.TypeAgent
-		case "command":
-			t = index.TypeCommand
-		default:
+		t, ok := filterTypes[filter]
+		if !ok {
 			return fmt.Errorf("unknown filter type: %q", filter)
 		}
 		entries = search.FilterByType(entries, t)
 	}
 
-	stops := search.DefaultStopWords()
-	tokens := search.Tokenize(prompt, stops)
-	results := search.ScoreTop(entries, tokens, threshold, limit, idx.IDF, idx.AvgFieldLen)
+	tokens := search.Tokenize(prompt, search.DefaultStopWords())
+	results := search.ScoreTop(entries, tokens, opts.threshold, opts.limit, idx.IDF, idx.AvgFieldLen)
 
-	switch format {
+	switch opts.format {
 	case "json":
 		return output.WriteJSON(os.Stdout, results)
 	default:
@@ -150,24 +150,10 @@ func scanCmd() *cobra.Command {
 	}
 }
 
-// rebuildIndex discovers sources, scans, and saves the index.
-func rebuildIndex() ([]index.Entry, error) {
-	sourceDirs, err := index.SourceDirs()
-	if err != nil {
-		return nil, fmt.Errorf("discovering sources: %w", err)
-	}
-	idx, err := index.ForceRebuild(sourceDirs)
-	if err != nil {
-		return nil, err
-	}
-	return idx.Entries, nil
-}
-
 func initCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
-		Short: "Wire hooks into Claude Code and build the initial index",
-		Long:  "Registers claudette as a UserPromptSubmit and PostToolUse hook in ~/.claude/settings.json, writes default config, and runs the first scan. Safe to re-run — idempotent.",
+		Short: "Wire hooks, write config, and build the initial index (idempotent)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInit()
 		},
@@ -175,25 +161,49 @@ func initCmd() *cobra.Command {
 }
 
 func runInit() error {
+	binPath, err := resolvedExecutable()
+	if err != nil {
+		return err
+	}
+
+	if err := wireHooks(binPath); err != nil {
+		return err
+	}
+	if err := ensureConfig(); err != nil {
+		return err
+	}
+
+	entries, err := rebuildIndex()
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stdout, "Index built: %d entries cached\n", len(entries))
+	fmt.Fprintln(os.Stdout, "Ready — hooks active on next Claude Code session.")
+	return nil
+}
+
+func resolvedExecutable() (string, error) {
 	binPath, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolving binary path: %w", err)
+		return "", fmt.Errorf("resolving binary path: %w", err)
 	}
 	if resolved, err := filepath.EvalSymlinks(binPath); err == nil {
 		binPath = resolved
 	}
+	return binPath, nil
+}
 
-	// Wire hooks into Claude Code settings.
+func wireHooks(binPath string) error {
 	settings, err := index.ReadClaudeSettings()
 	if err != nil {
 		return fmt.Errorf("reading settings: %w", err)
 	}
 
+	index.RemoveInvalidHookEvents(settings)
+
 	hookCmd := binPath + " hook"
 	postCmd := binPath + " post-tool-use"
-
-	// Clean up invalid hook event from older claudette versions.
-	index.RemoveInvalidHookEvents(settings)
 
 	wired1, err := index.UpsertHookEntry(settings, "UserPromptSubmit", hookCmd, "claudette")
 	if err != nil {
@@ -204,47 +214,65 @@ func runInit() error {
 		return fmt.Errorf("wiring PostToolUse hook: %w", err)
 	}
 
-	if wired1 || wired2 {
-		if err := index.WriteClaudeSettings(settings); err != nil {
-			return fmt.Errorf("writing settings: %w", err)
-		}
-		if wired1 {
-			fmt.Fprintf(os.Stdout, "Wired UserPromptSubmit hook -> %s\n", hookCmd)
-		}
-		if wired2 {
-			fmt.Fprintf(os.Stdout, "Wired PostToolUse hook -> %s\n", postCmd)
-		}
-	} else {
+	if !wired1 && !wired2 {
 		fmt.Fprintln(os.Stdout, "Hooks already wired.")
+		return nil
 	}
 
-	// Write default config if missing.
+	if err := index.WriteClaudeSettings(settings); err != nil {
+		return fmt.Errorf("writing settings: %w", err)
+	}
+	if wired1 {
+		fmt.Fprintf(os.Stdout, "Wired UserPromptSubmit hook -> %s\n", hookCmd)
+	}
+	if wired2 {
+		fmt.Fprintf(os.Stdout, "Wired PostToolUse hook -> %s\n", postCmd)
+	}
+	return nil
+}
+
+func ensureConfig() error {
 	cfg, err := index.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
-	if len(cfg.SourceDirs) == 0 {
-		defaults, err := index.DefaultSourceDirs()
-		if err != nil {
-			return fmt.Errorf("resolving default dirs: %w", err)
-		}
-		cfg.SourceDirs = defaults
-		if err := index.SaveConfig(cfg); err != nil {
-			return fmt.Errorf("saving config: %w", err)
-		}
-		configPath, _ := index.ConfigPath()
-		fmt.Fprintf(os.Stdout, "Config written to %s\n", configPath)
+	if len(cfg.SourceDirs) > 0 {
+		return nil
 	}
 
-	// Run initial scan.
-	entries, err := rebuildIndex()
+	defaults, err := index.DefaultSourceDirs()
 	if err != nil {
-		return err
+		return fmt.Errorf("resolving default dirs: %w", err)
 	}
-
-	fmt.Fprintf(os.Stdout, "Index built: %d entries cached\n", len(entries))
-	fmt.Fprintln(os.Stdout, "Ready — hooks active on next Claude Code session.")
+	cfg.SourceDirs = defaults
+	if err := index.SaveConfig(cfg); err != nil {
+		return fmt.Errorf("saving config: %w", err)
+	}
+	configPath, _ := index.ConfigPath()
+	fmt.Fprintf(os.Stdout, "Config written to %s\n", configPath)
 	return nil
+}
+
+// loadIndex discovers source dirs and loads (or rebuilds) the cached index.
+func loadIndex() (index.Index, error) {
+	sourceDirs, err := index.SourceDirs()
+	if err != nil {
+		return index.Index{}, fmt.Errorf("discovering sources: %w", err)
+	}
+	return index.LoadOrRebuild(sourceDirs)
+}
+
+// rebuildIndex forces a full rescan and saves the index.
+func rebuildIndex() ([]index.Entry, error) {
+	sourceDirs, err := index.SourceDirs()
+	if err != nil {
+		return nil, fmt.Errorf("discovering sources: %w", err)
+	}
+	idx, err := index.ForceRebuild(sourceDirs)
+	if err != nil {
+		return nil, err
+	}
+	return idx.Entries, nil
 }
 
 func versionCmd() *cobra.Command {
@@ -262,6 +290,9 @@ func resolveVersion() string {
 		return version
 	}
 	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
 		for _, s := range info.Settings {
 			if s.Key == "vcs.revision" && len(s.Value) >= 7 {
 				return s.Value[:7]
