@@ -148,6 +148,62 @@ func UpsertHookEntry(settings map[string]any, event, command string, identifier 
 	return true, nil
 }
 
+// RemoveHookEntries removes every hook entry across all events whose command
+// contains identifier. Prunes empty hook groups and empty event arrays so the
+// file doesn't accumulate dangling keys. Returns the number of entries removed.
+func RemoveHookEntries(settings map[string]any, identifier string) int {
+	hooksMap, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		return 0
+	}
+
+	removed := 0
+	for event, raw := range hooksMap {
+		groups, ok := raw.([]any)
+		if !ok {
+			continue
+		}
+		keptGroups := make([]any, 0, len(groups))
+		for _, g := range groups {
+			group, ok := g.(map[string]any)
+			if !ok {
+				keptGroups = append(keptGroups, g)
+				continue
+			}
+			hookList, ok := group["hooks"].([]any)
+			if !ok {
+				keptGroups = append(keptGroups, g)
+				continue
+			}
+			keptHooks := make([]any, 0, len(hookList))
+			for _, h := range hookList {
+				entry, ok := h.(map[string]any)
+				if !ok {
+					keptHooks = append(keptHooks, h)
+					continue
+				}
+				cmd, _ := entry["command"].(string)
+				if strings.Contains(cmd, identifier) {
+					removed++
+					continue
+				}
+				keptHooks = append(keptHooks, h)
+			}
+			if len(keptHooks) == 0 {
+				continue // drop group whose hooks are all ours
+			}
+			group["hooks"] = keptHooks
+			keptGroups = append(keptGroups, group)
+		}
+		if len(keptGroups) == 0 {
+			delete(hooksMap, event)
+			continue
+		}
+		hooksMap[event] = keptGroups
+	}
+	return removed
+}
+
 // deprecatedHookEvents are event names that older claudette versions
 // incorrectly wrote. Only these specific keys are cleaned up — we never
 // delete hook events we don't own.

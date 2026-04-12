@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `claudette install` command — successor to `init` with explicit path-per-side-effect output (names `~/.claude/settings.json` and `~/.config/claudette/` directly)
+- `claudette uninstall` command — removes every claudette-owned hook from `~/.claude/settings.json`, deletes `~/.config/claudette/`, and prints the exact `rm` command to remove the binary
+- `--version` and `-v` root flags via cobra's built-in version handling
+- Commit-hash + `-dirty` suffix in version output when built from a VCS checkout without a module version
+
+### Changed
+- `claudette init` is now an alias for `claudette install` (back-compat)
+- Install output reports each step with its absolute path, ends with `Reverse with: claudette uninstall`
+
 ## [0.5.1] - 2026-04-11
 
 ### Fixed

@@ -48,9 +48,12 @@ func rootCmd() *cobra.Command {
 	var opts actions.SearchOpts
 
 	root := &cobra.Command{
-		Use:   "claudette",
-		Short: "Knowledge and skill discovery for Claude Code",
+		Use:     "claudette",
+		Short:   "Knowledge and skill discovery for Claude Code",
+		Version: resolveVersion(),
 	}
+	// Cobra auto-registers --version when Version is set; keep output terse.
+	root.SetVersionTemplate("{{.Version}}\n")
 
 	root.PersistentFlags().StringVar(&opts.Format, "format", "text", "Output format: text or json")
 	root.PersistentFlags().IntVar(&opts.Threshold, "threshold", search.DefaultThreshold, "Minimum score to include in results")
@@ -61,7 +64,8 @@ func rootCmd() *cobra.Command {
 		newSearchCmd(&opts, "kb"),
 		newSearchCmd(&opts, "skill"),
 		scanCmd(),
-		initCmd(),
+		installCmd(),
+		uninstallCmd(),
 		versionCmd(),
 	)
 
@@ -101,12 +105,30 @@ func scanCmd() *cobra.Command {
 	}
 }
 
-func initCmd() *cobra.Command {
+func installCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "init",
-		Short: "Wire hooks, write config, and build the initial index (idempotent)",
+		Use:     "install",
+		Aliases: []string{"init"},
+		Short:   "Install claudette: wire hooks into ~/.claude/settings.json, write config, build index",
+		Long: "Install claudette. Modifies ~/.claude/settings.json to register " +
+			"UserPromptSubmit + PostToolUse hooks, writes ~/.config/claudette/config.json, " +
+			"and builds the initial search index. Idempotent — safe to re-run.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return actions.Init(os.Stdout)
+			return actions.Install(os.Stdout)
+		},
+	}
+}
+
+func uninstallCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "uninstall",
+		Short: "Uninstall claudette: remove hooks from ~/.claude/settings.json and delete ~/.config/claudette/",
+		Long: "Uninstall claudette. Removes every hook entry claudette owns from " +
+			"~/.claude/settings.json (leaves other tools' hooks intact) and deletes " +
+			"~/.config/claudette/. The binary is not removed — a running process cannot " +
+			"reliably delete itself — but the exact rm command is printed at the end.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return actions.Uninstall(os.Stdout)
 		},
 	}
 }
@@ -121,19 +143,38 @@ func versionCmd() *cobra.Command {
 	}
 }
 
+// resolveVersion prefers (in order): ldflags-injected version, module version
+// from BuildInfo (set by `go install ...@vX.Y.Z`), short VCS commit, or "dev".
+// When only a commit is available we also include a "-dirty" marker if the
+// build was from a modified tree.
 func resolveVersion() string {
 	if version != "dev" {
 		return version
 	}
-	if info, ok := debug.ReadBuildInfo(); ok {
-		if v := info.Main.Version; v != "" && v != "(devel)" {
-			return v
-		}
-		for _, s := range info.Settings {
-			if s.Key == "vcs.revision" && len(s.Value) >= 7 {
-				return s.Value[:7]
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return version
+	}
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+	var commit string
+	var dirty bool
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			if len(s.Value) >= 7 {
+				commit = s.Value[:7]
 			}
+		case "vcs.modified":
+			dirty = s.Value == "true"
 		}
 	}
-	return version
+	if commit == "" {
+		return version
+	}
+	if dirty {
+		return commit + "-dirty"
+	}
+	return commit
 }

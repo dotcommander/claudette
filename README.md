@@ -9,8 +9,10 @@ Claudette fixes that. Two commands, zero maintenance:
 
 ```bash
 go install github.com/dotcommander/claudette/cmd/claudette@latest
-claudette init
+claudette install
 ```
+
+`claudette install` adds two hook entries to `~/.claude/settings.json` (`UserPromptSubmit` and `PostToolUse`), writes `~/.config/claudette/config.json`, and builds the initial index. It's idempotent. Reverse it any time with `claudette uninstall`.
 
 Now when you type "fix the goroutine deadlock" at 11pm, Claude automatically sees the KB entry you wrote three weeks ago — the one where you spent an hour tracing that channel bug. When your build breaks, Claude surfaces the entry from last time you hit that exact error. Your past debugging sessions become automatic context for every future conversation.
 
@@ -29,7 +31,7 @@ Claudette runs as a [Claude Code hook](https://docs.anthropic.com/en/docs/claude
 1. **UserPromptSubmit** — scores your prompt against indexed entries and surfaces the top matches. Runs in under 50ms.
 2. **PostToolUse** — watches for error signals (build failures, test errors, panics) and surfaces relevant KB entries when things break.
 
-`claudette init` wires both hooks into `~/.claude/settings.json` and builds the index. It's idempotent — safe to re-run anytime.
+`claudette install` wires both hooks into `~/.claude/settings.json` and builds the index. It's idempotent — safe to re-run anytime. `claudette uninstall` removes every entry it added and deletes `~/.config/claudette/`; the binary itself stays in `$GOPATH/bin` so you can remove it with `rm` when you're ready.
 
 ## CLI
 
@@ -60,7 +62,7 @@ The index lives at `~/.config/claudette/index.json` and auto-rebuilds when files
 
 ## Configuration
 
-`claudette init` writes `~/.config/claudette/config.json`:
+`claudette install` writes `~/.config/claudette/config.json`:
 
 ```json
 {
@@ -81,7 +83,12 @@ Add extra directories to index team-wide skill repos or project-specific knowled
 
 ## Documentation
 
-- [Setup & Installation](docs/setup.md)
+- [Installation](docs/installation.md) — install, verify, uninstall, update
+- [How It Works](docs/how-it-works.md) — hook flow, index, scoring algorithm
+- [Searching](docs/searching.md) — CLI commands and flags
+- [Configuration](docs/configuration.md) — source directories, output modes, env vars
+- [Writing Entries](docs/writing-entries.md) — frontmatter, keyword weights, testing your entries
+- [Troubleshooting](docs/troubleshooting.md) — diagnostics, common errors, hook debugging
 - [Contributing](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
 
