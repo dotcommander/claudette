@@ -16,3 +16,4 @@ test/*.tsv
 
 # OS
 .DS_Store
+.work
