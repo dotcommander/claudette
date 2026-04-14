@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -19,9 +18,6 @@ import (
 // maxStdinBytes caps stdin reads to prevent unbounded memory use.
 const maxStdinBytes = 1 << 20 // 1MB
 
-// errorSignalRe matches lines containing common error signals in tool output.
-var errorSignalRe = regexp.MustCompile(`(?i)\b(error|fail|panic|undefined|cannot|not found|fatal|FAIL)\b`)
-
 // --- Protocol types ---
 
 // hookInput matches Claude Code's UserPromptSubmit stdin JSON.
@@ -29,8 +25,8 @@ type hookInput struct {
 	Prompt string `json:"prompt"`
 }
 
-// postToolUseInput matches Claude Code's PostToolUse stdin JSON.
-type postToolUseInput struct {
+// postToolUseFailureInput matches Claude Code's PostToolUseFailure stdin JSON.
+type postToolUseFailureInput struct {
 	ToolName     string `json:"tool_name"`
 	ToolInput    any    `json:"tool_input"`
 	ToolResponse any    `json:"tool_response"`
@@ -84,12 +80,12 @@ func Run() error {
 	return scoreAndRespond(tokens, "UserPromptSubmit", &status)
 }
 
-// RunPostToolUse handles the PostToolUse hook: reads tool output from stdin,
-// checks for error signals, and surfaces relevant KB entries on failures.
-// Successful tool outputs produce no output.
-func RunPostToolUse() error {
+// RunPostToolUseFailure handles the PostToolUseFailure hook: fires only when
+// a tool invocation fails, so the failure signal is guaranteed — we tokenize
+// the tool response directly and surface matching KB entries.
+func RunPostToolUseFailure() error {
 	var status string
-	defer logStatus("claudette post-tool-use", &status, time.Now())()
+	defer logStatus("claudette post-tool-use-failure", &status, time.Now())()
 
 	data, err := readStdin()
 	if err != nil {
@@ -97,7 +93,7 @@ func RunPostToolUse() error {
 		return err
 	}
 
-	var input postToolUseInput
+	var input postToolUseFailureInput
 	if err := json.Unmarshal(data, &input); err != nil {
 		status = "skip: malformed input"
 		return nil
@@ -109,18 +105,13 @@ func RunPostToolUse() error {
 		return nil
 	}
 
-	if !errorSignalRe.MatchString(resultText) {
-		status = "skip: no error signal"
-		return nil
-	}
-
-	tokens := extractErrorTokens(resultText)
+	tokens := search.Tokenize(resultText, search.DefaultStopWords())
 	if len(tokens) == 0 {
-		status = "skip: no searchable tokens in error"
+		status = "skip: no searchable tokens"
 		return nil
 	}
 
-	return scoreAndRespond(tokens, "PostToolUse", &status)
+	return scoreAndRespond(tokens, "PostToolUseFailure", &status)
 }
 
 // --- Shared pipeline ---
@@ -200,20 +191,6 @@ func anyToString(v any) string {
 		}
 		return string(b)
 	}
-}
-
-// extractErrorTokens filters lines containing error signals and tokenizes them.
-func extractErrorTokens(text string) []string {
-	var b strings.Builder
-	for _, line := range strings.Split(text, "\n") {
-		if errorSignalRe.MatchString(line) {
-			if b.Len() > 0 {
-				b.WriteByte(' ')
-			}
-			b.WriteString(line)
-		}
-	}
-	return search.Tokenize(b.String(), search.DefaultStopWords())
 }
 
 func formatContext(results []search.ScoredEntry, mode string) string {

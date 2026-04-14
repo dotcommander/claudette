@@ -38,8 +38,13 @@ func fastPath(cmd string) (bool, error) {
 	switch cmd {
 	case "hook":
 		return true, hook.Run()
+	case "post-tool-use-failure":
+		return true, hook.RunPostToolUseFailure()
 	case "post-tool-use":
-		return true, hook.RunPostToolUse()
+		// Back-compat: pre-v0.6.0 installs wrote this subcommand into
+		// settings.json. Existing sessions keep working until the user
+		// re-runs `claudette install`, which rewrites the hook entry.
+		return true, hook.RunPostToolUseFailure()
 	}
 	return false, nil
 }
@@ -111,8 +116,9 @@ func installCmd() *cobra.Command {
 		Aliases: []string{"init"},
 		Short:   "Install claudette: wire hooks into ~/.claude/settings.json, write config, build index",
 		Long: "Install claudette. Modifies ~/.claude/settings.json to register " +
-			"UserPromptSubmit + PostToolUse hooks, writes ~/.config/claudette/config.json, " +
-			"and builds the initial search index. Idempotent — safe to re-run.",
+			"UserPromptSubmit + PostToolUseFailure hooks, writes ~/.config/claudette/config.json, " +
+			"and builds the initial search index. Idempotent — safe to re-run. " +
+			"Migrates pre-v0.6.0 installs off the legacy PostToolUse hook.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return actions.Install(os.Stdout)
 		},

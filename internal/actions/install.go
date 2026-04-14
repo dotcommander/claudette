@@ -94,10 +94,8 @@ func Uninstall(w io.Writer) error {
 
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Uninstalled.")
-	if binPath != "" {
-		fmt.Fprintf(w, "Binary still installed at %s\n", binPath)
-		fmt.Fprintf(w, "Remove with: rm %s\n", binPath)
-	}
+	fmt.Fprintf(w, "Binary still installed at %s\n", binPath)
+	fmt.Fprintf(w, "Remove with: rm %s\n", binPath)
 	return nil
 }
 
@@ -120,19 +118,25 @@ func wireHooks(w io.Writer, binPath string) error {
 
 	index.RemoveInvalidHookEvents(settings)
 
+	// Migrate pre-v0.6.0 installs: PostToolUse fired on every tool call and
+	// used regex to sniff for failure text, which produced false positives and
+	// wasted cycles on every success. PostToolUseFailure fires only on actual
+	// failures — strictly better signal.
+	migrated := index.RemoveHookEntriesForEvent(settings, "PostToolUse", hookIdentifier)
+
 	hookCmd := binPath + " hook"
-	postCmd := binPath + " post-tool-use"
+	failCmd := binPath + " post-tool-use-failure"
 
 	wired1, err := index.UpsertHookEntry(settings, "UserPromptSubmit", hookCmd, hookIdentifier)
 	if err != nil {
 		return fmt.Errorf("wiring UserPromptSubmit hook: %w", err)
 	}
-	wired2, err := index.UpsertHookEntry(settings, "PostToolUse", postCmd, hookIdentifier)
+	wired2, err := index.UpsertHookEntry(settings, "PostToolUseFailure", failCmd, hookIdentifier)
 	if err != nil {
-		return fmt.Errorf("wiring PostToolUse hook: %w", err)
+		return fmt.Errorf("wiring PostToolUseFailure hook: %w", err)
 	}
 
-	if !wired1 && !wired2 {
+	if migrated == 0 && !wired1 && !wired2 {
 		fmt.Fprintln(w, "  hooks:    already wired (idempotent no-op)")
 		return nil
 	}
@@ -140,11 +144,14 @@ func wireHooks(w io.Writer, binPath string) error {
 	if err := index.WriteClaudeSettings(settings); err != nil {
 		return fmt.Errorf("writing settings: %w", err)
 	}
+	if migrated > 0 {
+		fmt.Fprintf(w, "  hooks:    - PostToolUse (migrated to PostToolUseFailure)\n")
+	}
 	if wired1 {
-		fmt.Fprintf(w, "  hooks:    + UserPromptSubmit -> %s\n", hookCmd)
+		fmt.Fprintf(w, "  hooks:    + UserPromptSubmit    -> %s\n", hookCmd)
 	}
 	if wired2 {
-		fmt.Fprintf(w, "  hooks:    + PostToolUse     -> %s\n", postCmd)
+		fmt.Fprintf(w, "  hooks:    + PostToolUseFailure  -> %s\n", failCmd)
 	}
 	return nil
 }

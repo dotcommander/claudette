@@ -156,49 +156,73 @@ func RemoveHookEntries(settings map[string]any, identifier string) int {
 	if !ok {
 		return 0
 	}
-
 	removed := 0
-	for event, raw := range hooksMap {
-		groups, ok := raw.([]any)
+	// Snapshot keys: pruneEventHooks may delete entries from hooksMap.
+	events := make([]string, 0, len(hooksMap))
+	for event := range hooksMap {
+		events = append(events, event)
+	}
+	for _, event := range events {
+		removed += pruneEventHooks(hooksMap, event, identifier)
+	}
+	return removed
+}
+
+// RemoveHookEntriesForEvent removes entries from a single event whose command
+// contains identifier. Used to migrate claudette off previously-wired event
+// names (e.g. PostToolUse -> PostToolUseFailure). Returns the count removed.
+func RemoveHookEntriesForEvent(settings map[string]any, event, identifier string) int {
+	hooksMap, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		return 0
+	}
+	return pruneEventHooks(hooksMap, event, identifier)
+}
+
+// pruneEventHooks strips entries for a single event whose command contains
+// identifier. Drops emptied groups and deletes the event key if everything
+// was ours. Returns the number of hook entries removed.
+func pruneEventHooks(hooksMap map[string]any, event, identifier string) int {
+	groups, ok := hooksMap[event].([]any)
+	if !ok {
+		return 0
+	}
+	removed := 0
+	keptGroups := make([]any, 0, len(groups))
+	for _, g := range groups {
+		group, ok := g.(map[string]any)
 		if !ok {
+			keptGroups = append(keptGroups, g)
 			continue
 		}
-		keptGroups := make([]any, 0, len(groups))
-		for _, g := range groups {
-			group, ok := g.(map[string]any)
+		hookList, ok := group["hooks"].([]any)
+		if !ok {
+			keptGroups = append(keptGroups, g)
+			continue
+		}
+		keptHooks := make([]any, 0, len(hookList))
+		for _, h := range hookList {
+			entry, ok := h.(map[string]any)
 			if !ok {
-				keptGroups = append(keptGroups, g)
-				continue
-			}
-			hookList, ok := group["hooks"].([]any)
-			if !ok {
-				keptGroups = append(keptGroups, g)
-				continue
-			}
-			keptHooks := make([]any, 0, len(hookList))
-			for _, h := range hookList {
-				entry, ok := h.(map[string]any)
-				if !ok {
-					keptHooks = append(keptHooks, h)
-					continue
-				}
-				cmd, _ := entry["command"].(string)
-				if strings.Contains(cmd, identifier) {
-					removed++
-					continue
-				}
 				keptHooks = append(keptHooks, h)
+				continue
 			}
-			if len(keptHooks) == 0 {
-				continue // drop group whose hooks are all ours
+			cmd, _ := entry["command"].(string)
+			if strings.Contains(cmd, identifier) {
+				removed++
+				continue
 			}
-			group["hooks"] = keptHooks
-			keptGroups = append(keptGroups, group)
+			keptHooks = append(keptHooks, h)
 		}
-		if len(keptGroups) == 0 {
-			delete(hooksMap, event)
-			continue
+		if len(keptHooks) == 0 {
+			continue // drop group whose hooks are all ours
 		}
+		group["hooks"] = keptHooks
+		keptGroups = append(keptGroups, group)
+	}
+	if len(keptGroups) == 0 {
+		delete(hooksMap, event)
+	} else {
 		hooksMap[event] = keptGroups
 	}
 	return removed
@@ -209,9 +233,11 @@ func RemoveHookEntries(settings map[string]any, identifier string) int {
 // delete hook events we don't own.
 var deprecatedHookEvents = []string{"PostToolResult"}
 
-// RemoveInvalidHookEvents cleans up hook event keys that older claudette
-// versions wrote incorrectly (e.g., "PostToolResult" instead of "PostToolUse").
-// Only removes known-bad keys — never touches events registered by other tools.
+// RemoveInvalidHookEvents deletes hook event keys listed in
+// deprecatedHookEvents — event names that older claudette versions wrote but
+// that Claude Code never recognised (e.g., "PostToolResult"). Distinct from
+// RemoveHookEntriesForEvent, which migrates entries off a valid-but-retired
+// event like "PostToolUse". Only touches known-bad keys.
 func RemoveInvalidHookEvents(settings map[string]any) {
 	hooksMap, ok := settings["hooks"].(map[string]any)
 	if !ok {
