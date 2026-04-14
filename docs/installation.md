@@ -23,14 +23,16 @@ Open a new Claude Code session. Claudette is active.
 ```
 Installing claudette...
   settings: /Users/you/.claude/settings.json
-  hooks:    + UserPromptSubmit -> /Users/you/go/bin/claudette hook
-  hooks:    + PostToolUse     -> /Users/you/go/bin/claudette post-tool-use
+  hooks:    + UserPromptSubmit    -> /Users/you/go/bin/claudette hook
+  hooks:    + PostToolUseFailure  -> /Users/you/go/bin/claudette post-tool-use-failure
   config:   wrote /Users/you/.config/claudette/config.json
   index:    881 entries cached
 
 Installed. Hooks active on next Claude Code session.
 Reverse with: claudette uninstall
 ```
+
+Upgrading from pre-v0.6.0? `claudette install` removes the legacy `PostToolUse` hook entry and wires `PostToolUseFailure` in its place, prints a one-line migration notice (`- PostToolUse (migrated to PostToolUseFailure)`), and leaves every other tool's hooks untouched.
 
 Re-running `claudette install` is safe — it skips already-wired hooks and just rebuilds the index:
 

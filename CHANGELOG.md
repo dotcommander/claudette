@@ -5,17 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-04-13
 
 ### Added
 - `claudette install` command — successor to `init` with explicit path-per-side-effect output (names `~/.claude/settings.json` and `~/.config/claudette/` directly)
 - `claudette uninstall` command — removes every claudette-owned hook from `~/.claude/settings.json`, deletes `~/.config/claudette/`, and prints the exact `rm` command to remove the binary
 - `--version` and `-v` root flags via cobra's built-in version handling
 - Commit-hash + `-dirty` suffix in version output when built from a VCS checkout without a module version
+- `claudette post-tool-use-failure` subcommand, wired to the new `PostToolUseFailure` hook
+- `index.RemoveHookEntriesForEvent` — scoped hook removal used by the install-time migration
 
 ### Changed
+- **Hook event: `PostToolUse` → `PostToolUseFailure`.** The old hook fired on every tool call and regex-sniffed the response for words like "error" or "fail" — which flagged every tool output that happened to contain those words (source code, logs, docs) and paid the scoring cost on every success. `PostToolUseFailure` fires only on actual tool failures, so the hook is silent on success and tokenizes the full response (no regex) on failure. `claudette install` migrates pre-v0.6.0 settings automatically: it removes the old `PostToolUse` entry and writes `PostToolUseFailure` in its place.
 - `claudette init` is now an alias for `claudette install` (back-compat)
 - Install output reports each step with its absolute path, ends with `Reverse with: claudette uninstall`
+
+### Removed
+- `errorSignalRe` regex and `extractErrorTokens` in `internal/hook/` — the new event makes failure-sniffing unnecessary
+
+### Deprecated
+- `claudette post-tool-use` subcommand — kept as a silent alias so pre-v0.6.0 `settings.json` keeps working until the next `claudette install`
 
 ## [0.5.1] - 2026-04-11
 

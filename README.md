@@ -12,7 +12,7 @@ go install github.com/dotcommander/claudette/cmd/claudette@latest
 claudette install
 ```
 
-`claudette install` adds two hook entries to `~/.claude/settings.json` (`UserPromptSubmit` and `PostToolUse`), writes `~/.config/claudette/config.json`, and builds the initial index. It's idempotent. Reverse it any time with `claudette uninstall`.
+`claudette install` adds two hook entries to `~/.claude/settings.json` (`UserPromptSubmit` and `PostToolUseFailure`), writes `~/.config/claudette/config.json`, and builds the initial index. It's idempotent. Reverse it any time with `claudette uninstall`.
 
 Now when you type "fix the goroutine deadlock" at 11pm, Claude automatically sees the KB entry you wrote three weeks ago — the one where you spent an hour tracing that channel bug. When your build breaks, Claude surfaces the entry from last time you hit that exact error. Your past debugging sessions become automatic context for every future conversation.
 
@@ -22,14 +22,14 @@ Now when you type "fix the goroutine deadlock" at 11pm, Claude automatically see
 
 **After:** Claudette scores your prompt against every KB article, skill, agent, and command you've installed. Claude sees the match, reads the entry, and applies what you already know — before writing a single line of code.
 
-This works for errors too. A test fails with `undefined: NewRouter` — claudette detects the error signal in the tool output, finds your KB entry about chi/v5 import paths, and surfaces it. You stop re-debugging solved problems.
+This works for errors too. A test fails with `undefined: NewRouter` — Claude Code fires `PostToolUseFailure`, claudette tokenizes the failing tool output, finds your KB entry about chi/v5 import paths, and surfaces it. You stop re-debugging solved problems.
 
 ## How it works
 
 Claudette runs as a [Claude Code hook](https://docs.anthropic.com/en/docs/claude-code/hooks) — invisible infrastructure that fires on every prompt:
 
 1. **UserPromptSubmit** — scores your prompt against indexed entries and surfaces the top matches. Runs in under 50ms.
-2. **PostToolUse** — watches for error signals (build failures, test errors, panics) and surfaces relevant KB entries when things break.
+2. **PostToolUseFailure** — fires only when a tool call fails. Tokenizes the failing output and surfaces relevant KB entries so Claude sees the fix you already wrote down.
 
 `claudette install` wires both hooks into `~/.claude/settings.json` and builds the index. It's idempotent — safe to re-run anytime. `claudette uninstall` removes every entry it added and deletes `~/.config/claudette/`; the binary itself stays in `$GOPATH/bin` so you can remove it with `rm` when you're ready.
 

@@ -11,7 +11,7 @@ jq '.hooks | to_entries | map(select(.value | tostring | contains("claudette")))
   ~/.claude/settings.json
 ```
 
-Expected output: `["PostToolUse", "UserPromptSubmit"]`
+Expected output: `["PostToolUseFailure", "UserPromptSubmit"]`
 
 If the output is `[]`, the hooks aren't registered. Run `claudette install`.
 
@@ -153,7 +153,7 @@ Every hook call logs one line to stderr. These are diagnostic — they never app
 | `skip: empty prompt` | Empty input | Expected behavior |
 | `skip: index load failed` | Can't read index file | Run `claudette scan` |
 | `skip: source discovery failed` | Can't read config or home dir | Run `claudette install` |
-| `skip: no error signal` | PostToolUse — tool output has no error words | Expected behavior |
+| `skip: empty tool response` | PostToolUseFailure — tool failed with no response text | Expected behavior |
 
 ### Quick diagnostics
 
@@ -165,9 +165,9 @@ jq '.hooks | to_entries | map(select(.value | tostring | contains("claudette")))
 # Test UserPromptSubmit hook
 echo '{"prompt":"fix goroutine race condition"}' | claudette hook
 
-# Test PostToolUse hook with a fake error
+# Test PostToolUseFailure hook with a simulated tool failure payload
 echo '{"tool_name":"Bash","tool_input":{},"tool_response":"Error: undefined: chi.NewRouter"}' \
-  | claudette post-tool-use
+  | claudette post-tool-use-failure
 
 # Check index health
 claudette scan

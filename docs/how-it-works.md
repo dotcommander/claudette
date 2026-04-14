@@ -35,30 +35,24 @@ The full round-trip runs in under 50ms on a warm index.
 | Empty prompt | `""` | Nothing to score |
 | All stop words | `"ok great thanks"` | No searchable tokens after filtering |
 
-### PostToolUse
+### PostToolUseFailure
 
-This hook fires after every tool call. It watches the tool's output for error signals and surfaces relevant KB entries automatically — before you've typed anything.
+This hook fires **only when a tool call fails** — Claude Code does the failure detection, so claudette doesn't regex-sniff tool output. Successful tool calls don't invoke this hook at all.
 
 ```
-A Bash tool call returns:
+A Bash tool call fails:
   "go build ./...: undefined: chi.NewRouter"
               ↓
-claudette: detect error signal ("undefined")
+Claude Code fires PostToolUseFailure with the tool response
               ↓
-         extract error lines only
-              ↓
-         tokenize → ["undefined", "chi", "newrouter"]
+claudette: tokenize the response → ["undefined", "chi", "newrouter"]
               ↓
          score → kb/go/chi-import-path (6)
               ↓
 Claude sees the chi import path KB entry without you asking
 ```
 
-**Error signals claudette detects** (case-insensitive, whole-word):
-
-`error` · `fail` · `panic` · `undefined` · `cannot` · `not found` · `fatal` · `FAIL`
-
-Successful tool output produces no hook response — claudette only surfaces context when something breaks.
+Because the hook only fires on actual failures, there are no false positives from successful output that happens to contain the word "error" or "fail" (source code, log files, docs).
 
 ## The Index
 

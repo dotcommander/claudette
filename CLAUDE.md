@@ -25,7 +25,7 @@ Claudette indexes Claude Code components (`~/.claude/kb/`, skills, agents, comma
 
 - `internal/index/` — Entry types, frontmatter parsing, filesystem scanning, index cache (load/save/staleness)
 - `internal/search/` — Tokenizer (stop words, hyphen-preserving split), category alias map, keyword-overlap scorer
-- `internal/hook/` — UserPromptSubmit hook mode (stdin JSON -> stdout context)
+- `internal/hook/` — UserPromptSubmit + PostToolUseFailure hook modes (stdin JSON -> stdout context)
 - `internal/output/` — Text and JSON formatters
 
 ### Index & Staleness
@@ -47,8 +47,13 @@ Results filtered by threshold (default 2), capped by limit (default 5), sorted b
 
 ### Hook Protocol
 
-**Input** (stdin): `{"prompt": "user text"}`
-**Output** (stdout): `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "..."}}`
+**UserPromptSubmit**
+- Input (stdin): `{"prompt": "user text"}`
+- Output (stdout): `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "..."}}`
+
+**PostToolUseFailure** (fires only on tool failures — no regex sniffing, no success-path noise)
+- Input (stdin): `{"tool_name": "...", "tool_input": {...}, "tool_response": "..."}`
+- Output (stdout): `{"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": "..."}}`
 
 All errors exit silently (no stdout/stderr) — hook must never block the user's conversation. Prompts starting with `/` are skipped (slash commands, not searches). Hook hardcodes threshold=2, limit=5.
 
