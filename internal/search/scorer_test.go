@@ -275,6 +275,36 @@ func TestScore(t *testing.T) {
 			wantCount: 2,
 			wantFirst: "go-full",
 		},
+		{
+			// Case 14: token "go" maps to category alias "go" and must surface kb/go entries
+			// even when IDF is computed (i.e. "go" has high df, low IDF as a keyword).
+			// The alias boost is flat +2 — not multiplied by IDF — so it must always reach
+			// threshold=2 regardless of how common "go" is as a keyword across the corpus.
+			// This is the regression case: `claudette search go` returned zero results before
+			// "go" was added to categoryAliases.
+			name: "token go aliases to category go with real IDF",
+			entries: func() []index.Entry {
+				// "go" appears as a keyword in all entries → very low IDF.
+				// Alias boost must still reach threshold=2.
+				entries := make([]index.Entry, 10)
+				for i := range 10 {
+					entries[i] = makeEntry(
+						"go-entry-"+string(rune('a'+i)),
+						"Go Entry",
+						"go",
+						map[string]int{"go": 2, "goroutine": 1},
+						nil,
+					)
+				}
+				return entries
+			}(),
+			tokens:    []string{"go"},
+			threshold: 2,
+			autoIDF:   true,
+			wantNil:   false,
+			wantCount: 10,
+			wantFirst: "go-entry-a",
+		},
 	}
 
 	for _, tc := range tests {

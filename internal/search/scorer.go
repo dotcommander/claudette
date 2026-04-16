@@ -93,12 +93,16 @@ func scoreEntry(entry index.Entry, tokens []string, promptBigrams []string, idf 
 
 	dl := float64(len(entry.Keywords))
 	for _, tok := range tokens {
-		delta, hit := scoreToken(entry, tok, idf, dl, avgdl)
+		delta, hit, aliasHit := scoreToken(entry, tok, idf, dl, avgdl)
 		score += delta
 		if hit {
 			terms = append(terms, matchTerm{term: tok, delta: delta})
 			// Track max per-term IDF multiplier for the IDF gate.
-			if v := idfMul(idf, tok); v > maxIDF {
+			// Alias hits are curated signals — treat them as IDF=minIDFForMatch so
+			// they always pass the gate regardless of the token's corpus frequency.
+			if aliasHit {
+				maxIDF = max(maxIDF, minIDFForMatch)
+			} else if v := idfMul(idf, tok); v > maxIDF {
 				maxIDF = v
 			}
 		}
@@ -123,29 +127,35 @@ func scoreEntry(entry index.Entry, tokens []string, promptBigrams []string, idf 
 	return score, terms, bigramHit, maxIDF
 }
 
-// scoreToken returns the score contribution and whether the token matched.
+// scoreToken returns the score contribution, whether the token matched, and
+// whether the match was driven by a category alias.
 // dl is the document length (len(entry.Keywords)); avgdl is the corpus average.
-func scoreToken(entry index.Entry, tok string, idf map[string]float64, dl, avgdl float64) (float64, bool) {
+func scoreToken(entry index.Entry, tok string, idf map[string]float64, dl, avgdl float64) (float64, bool, bool) {
 	mul := idfMul(idf, tok)
 	var delta float64
+	var aliasHit bool
 
-	// Category alias boost: +2 × IDF (additive — does not short-circuit keyword matching).
+	// Category alias boost: flat +2 (additive — does not short-circuit keyword matching).
+	// Fixed multiplier avoids IDF suppressing curated alias signals when the alias
+	// token is also a common keyword (e.g. "go" has high df, low IDF, but is a
+	// deliberate user intent signal that must not be frequency-dampened).
 	if canonical, ok := CategoryAlias(tok); ok && canonical == entry.Category {
-		delta += 2.0 * mul
+		delta += 2.0
+		aliasHit = true
 	}
 
 	// Direct keyword match: BM25(weight, IDF, dl, avgdl).
 	if weight, ok := entry.Keywords[tok]; ok {
-		return delta + bm25(weight, mul, dl, avgdl), true
+		return delta + bm25(weight, mul, dl, avgdl), true, aliasHit
 	}
 
 	// Plural normalization: BM25 × 0.9.
 	if weight, ok := entry.Keywords[tok+"s"]; ok {
-		return delta + bm25(weight, mul, dl, avgdl)*0.9, true
+		return delta + bm25(weight, mul, dl, avgdl)*0.9, true, aliasHit
 	}
 	if stem, ok := strings.CutSuffix(tok, "s"); ok {
 		if weight, ok := entry.Keywords[stem]; ok {
-			return delta + bm25(weight, mul, dl, avgdl)*0.9, true
+			return delta + bm25(weight, mul, dl, avgdl)*0.9, true, aliasHit
 		}
 	}
 
@@ -153,13 +163,13 @@ func scoreToken(entry index.Entry, tok string, idf map[string]float64, dl, avgdl
 	if len(tok) >= 4 {
 		for kw, weight := range entry.Keywords {
 			if HasStemMatch(tok, kw) {
-				return delta + bm25(weight, mul, dl, avgdl)*0.6, true
+				return delta + bm25(weight, mul, dl, avgdl)*0.6, true, aliasHit
 			}
 		}
 	}
 
 	// Return alias-only contribution, if any.
-	return delta, delta > 0
+	return delta, delta > 0, aliasHit
 }
 
 // buildBigrams returns consecutive token pairs.

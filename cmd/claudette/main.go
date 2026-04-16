@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"runtime/debug"
 
@@ -60,13 +61,14 @@ func rootCmd() *cobra.Command {
 	root.SetVersionTemplate("{{.Version}}\n")
 
 	root.PersistentFlags().StringVar(&opts.Format, "format", opts.Format, "Output format: text or json")
+	root.PersistentFlags().BoolVar(&opts.JSON, "json", false, "Output as JSON (shorthand for --format json; takes precedence)")
 	root.PersistentFlags().IntVar(&opts.Threshold, "threshold", opts.Threshold, "Minimum score to include in results")
 	root.PersistentFlags().IntVar(&opts.Limit, "limit", opts.Limit, "Maximum number of results")
 
 	root.AddCommand(
-		newSearchCmd(&opts, ""),
-		newSearchCmd(&opts, "kb"),
-		newSearchCmd(&opts, "skill"),
+		newSearchCmd(&opts, "", os.Stdin),
+		newSearchCmd(&opts, "kb", os.Stdin),
+		newSearchCmd(&opts, "skill", os.Stdin),
 		scanCmd(),
 		installCmd(),
 		uninstallCmd(),
@@ -76,7 +78,7 @@ func rootCmd() *cobra.Command {
 	return root
 }
 
-func newSearchCmd(opts *actions.SearchOpts, filter string) *cobra.Command {
+func newSearchCmd(opts *actions.SearchOpts, filter string, stdin io.Reader) *cobra.Command {
 	use := "search"
 	short := "Search all entries (KB, skills, agents, commands)"
 	if filter != "" {
@@ -89,9 +91,22 @@ func newSearchCmd(opts *actions.SearchOpts, filter string) *cobra.Command {
 		Short: short,
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return actions.Search(os.Stdout, actions.FormatPrompt(args), filter, *opts)
+			prompt, err := resolvePrompt(args, stdin)
+			if err != nil {
+				return err
+			}
+			return actions.Search(os.Stdout, prompt, filter, *opts)
 		},
 	}
+}
+
+// resolvePrompt returns the search prompt from args or stdin.
+// When the sole argument is "-", the prompt is read from r.
+func resolvePrompt(args []string, r io.Reader) (string, error) {
+	if len(args) == 1 && args[0] == "-" {
+		return actions.ReadPromptFromReader(r)
+	}
+	return actions.FormatPrompt(args), nil
 }
 
 func scanCmd() *cobra.Command {

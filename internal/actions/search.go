@@ -13,6 +13,7 @@ import (
 // SearchOpts controls search behavior from CLI flags.
 type SearchOpts struct {
 	Format    string
+	JSON      bool // --json shorthand: when true, overrides Format to "json"
 	Threshold int
 	Limit     int
 }
@@ -28,6 +29,7 @@ func NewSearchOpts() SearchOpts {
 }
 
 // Search tokenizes the prompt, scores against the index, and writes results.
+// When opts.JSON is true, output is always JSON regardless of opts.Format.
 func Search(w io.Writer, prompt, filter string, opts SearchOpts) error {
 	idx, err := LoadIndex()
 	if err != nil {
@@ -46,7 +48,11 @@ func Search(w io.Writer, prompt, filter string, opts SearchOpts) error {
 	tokens := search.Tokenize(prompt, search.DefaultStopWords())
 	results := search.ScoreTop(entries, tokens, opts.Threshold, opts.Limit, idx.IDF, idx.AvgFieldLen)
 
-	switch opts.Format {
+	format := opts.Format
+	if opts.JSON {
+		format = "json"
+	}
+	switch format {
 	case "json":
 		return output.WriteJSON(w, results)
 	default:
@@ -97,4 +103,18 @@ func WriteScanSummary(w io.Writer, entries []index.Entry) {
 // FormatPrompt joins args into a single search prompt.
 func FormatPrompt(args []string) string {
 	return strings.Join(args, " ")
+}
+
+// ReadPromptFromReader reads the full contents of r, trims trailing whitespace,
+// and returns the result. Returns an error if the result is empty.
+func ReadPromptFromReader(r io.Reader) (string, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("reading stdin: %w", err)
+	}
+	prompt := strings.TrimRight(string(data), "\r\n\t ")
+	if prompt == "" {
+		return "", fmt.Errorf("stdin is empty: provide a non-empty prompt")
+	}
+	return prompt, nil
 }

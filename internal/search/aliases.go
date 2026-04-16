@@ -5,6 +5,7 @@ package search
 // Categories correspond to KB parent directory names (e.g., kb/go/ -> category "go").
 var categoryAliases = map[string]string{ //nolint:gochecknoglobals // immutable lookup table
 	// Go
+	"go":         "go",
 	"golang":     "go",
 	"goroutine":  "go",
 	"goroutines": "go",
