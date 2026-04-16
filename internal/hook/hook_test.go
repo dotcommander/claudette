@@ -21,7 +21,7 @@ func TestFormatContext_Full(t *testing.T) {
 	results := makeResults(
 		index.Entry{Name: "hook-reload", Title: "Hook Reload Caching", FilePath: "/tmp/test/hook-reload.md"},
 	)
-	got := formatContext(results, "full")
+	got := formatContext(results, "full", "Scan first 10 lines of each file. Only read full files that are clearly relevant.")
 	if !strings.Contains(got, "<related_skills_knowledge>") {
 		t.Error("full mode should contain <related_skills_knowledge> wrapper")
 	}
@@ -47,7 +47,7 @@ func TestFormatContext_Compact(t *testing.T) {
 	results := makeResults(
 		index.Entry{Name: "hook-reload", Title: "Hook Reload Caching", Desc: "Session caching invalidation gotcha", FilePath: "/tmp/test/hook-reload.md"},
 	)
-	got := formatContext(results, "compact")
+	got := formatContext(results, "compact", "Scan first 10 lines of each file. Only read full files that are clearly relevant.")
 	if !strings.Contains(got, "<related_skills_knowledge>") {
 		t.Error("compact mode should contain <related_skills_knowledge> wrapper")
 	}
@@ -76,7 +76,7 @@ func TestFormatContext_CompactFallsBackToTitle(t *testing.T) {
 	results := makeResults(
 		index.Entry{Name: "kb-entry", Title: "Some KB Title", Desc: "", FilePath: "/tmp/kb/entry.md"},
 	)
-	got := formatContext(results, "compact")
+	got := formatContext(results, "compact", "Scan first 10 lines of each file. Only read full files that are clearly relevant.")
 	if !strings.Contains(got, "Some KB Title") {
 		t.Error("compact mode should fall back to title when desc is empty")
 	}
@@ -100,5 +100,26 @@ func TestOutputMode_Unknown(t *testing.T) {
 	t.Setenv("CLAUDETTE_OUTPUT", "unknown")
 	if got := outputMode(); got != "full" {
 		t.Errorf("unknown value should default to full, got %q", got)
+	}
+}
+
+func TestFormatContext_CustomHeader(t *testing.T) {
+	t.Parallel()
+	results := makeResults(
+		index.Entry{Name: "kb-entry", Title: "KB Title", FilePath: "/tmp/kb/entry.md"},
+	)
+	custom := "Custom triage instruction: verify before using."
+	got := formatContext(results, "full", custom)
+	if !strings.Contains(got, custom) {
+		t.Errorf("output should contain custom header, got: %s", got)
+	}
+	if strings.Contains(got, "Only read full files") {
+		t.Error("output should NOT contain default header when custom header is supplied")
+	}
+	if !strings.Contains(got, "<related_skills_knowledge>") {
+		t.Error("output must still contain protocol open tag")
+	}
+	if !strings.Contains(got, "</related_skills_knowledge>") {
+		t.Error("output must still contain protocol close tag")
 	}
 }

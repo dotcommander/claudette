@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dotcommander/claudette/internal/index"
 )
@@ -145,7 +146,7 @@ func wireHooks(w io.Writer, binPath string) error {
 		return fmt.Errorf("writing settings: %w", err)
 	}
 	if migrated > 0 {
-		fmt.Fprintf(w, "  hooks:    - PostToolUse (migrated to PostToolUseFailure)\n")
+		fmt.Fprintln(w, "  hooks:    - PostToolUse (migrated to PostToolUseFailure)")
 	}
 	if wired1 {
 		fmt.Fprintf(w, "  hooks:    + UserPromptSubmit    -> %s\n", hookCmd)
@@ -166,16 +167,24 @@ func ensureConfig(w io.Writer) error {
 		return fmt.Errorf("resolving config path: %w", err)
 	}
 
-	if len(cfg.SourceDirs) > 0 {
+	changed := false
+	if len(cfg.SourceDirs) == 0 {
+		defaults, err := index.DefaultSourceDirs()
+		if err != nil {
+			return fmt.Errorf("resolving default dirs: %w", err)
+		}
+		cfg.SourceDirs = defaults
+		changed = true
+	}
+	if strings.TrimSpace(cfg.ContextHeader) == "" {
+		cfg.ContextHeader = index.DefaultContextHeader()
+		changed = true
+	}
+
+	if !changed {
 		fmt.Fprintf(w, "  config:   %s (existing)\n", configPath)
 		return nil
 	}
-
-	defaults, err := index.DefaultSourceDirs()
-	if err != nil {
-		return fmt.Errorf("resolving default dirs: %w", err)
-	}
-	cfg.SourceDirs = defaults
 	if err := index.SaveConfig(cfg); err != nil {
 		return fmt.Errorf("saving config: %w", err)
 	}

@@ -18,12 +18,13 @@ import (
 // maxStdinBytes caps stdin reads to prevent unbounded memory use.
 const maxStdinBytes = 1 << 20 // 1MB
 
-// hookContextHeader and hookContextFooter wrap the additional-context block
-// emitted to Claude Code. The header instructs the model how to triage the
-// surfaced entries; the footer closes the XML tag.
+// contextOpenTag and contextCloseTag are the XML protocol markers wrapping
+// the additional-context block emitted to Claude Code. The triage
+// instruction between them is user-configurable via Config.ContextHeader;
+// the tags themselves are not, because downstream tooling matches on them.
 const (
-	hookContextHeader = "<related_skills_knowledge>\nScan first 10 lines of each file. Only read full files that are clearly relevant.\n"
-	hookContextFooter = "\n</related_skills_knowledge>"
+	contextOpenTag  = "<related_skills_knowledge>"
+	contextCloseTag = "</related_skills_knowledge>"
 )
 
 // --- Protocol types ---
@@ -128,55 +129,53 @@ func RunPostToolUseFailure() error {
 // Sets status for the deferred logStatus call. Returns nil with empty status
 // when results are suppressed (no matches, low confidence).
 func scoreAndRespond(tokens []string, event string, status *string) error {
-	results, diagStatus, err := scoreTokens(tokens)
+	results, diagStatus := scoreTokens(tokens)
 	*status = diagStatus
-	if err != nil {
-		return err
-	}
 	if len(results) == 0 {
 		return nil
 	}
 
 	logUsage(results)
 
+	cfg, _ := index.LoadConfig() // zero-value Config falls back to defaults
 	resp := hookResponse{
 		HookSpecificOutput: &hookSpecificOutput{
 			HookEventName:     event,
-			AdditionalContext: formatContext(results, outputMode()),
+			AdditionalContext: formatContext(results, outputMode(), cfg.ContextHeaderOrDefault()),
 		},
 	}
 	return json.NewEncoder(os.Stdout).Encode(resp)
 }
 
 // scoreTokens loads the index and scores tokens against it.
-// Returns (nil, status, nil) when results should be suppressed.
-func scoreTokens(tokens []string) ([]search.ScoredEntry, string, error) {
+// Returns (nil, status) when results should be suppressed.
+func scoreTokens(tokens []string) ([]search.ScoredEntry, string) {
 	sourceDirs, err := index.SourceDirs()
 	if err != nil {
-		return nil, "skip: source discovery failed", nil
+		return nil, "skip: source discovery failed"
 	}
 
 	idx, err := index.LoadOrRebuild(sourceDirs)
 	if err != nil {
-		return nil, "skip: index load failed", nil
+		return nil, "skip: index load failed"
 	}
 
 	hits := search.ScoreTop(idx.Entries, tokens, search.DefaultThreshold, search.DefaultLimit, idx.IDF, idx.AvgFieldLen)
 	if len(hits) == 0 {
-		return nil, fmt.Sprintf("%v -> no matches", tokens), nil
+		return nil, fmt.Sprintf("%v -> no matches", tokens)
 	}
 	if hits[0].Score < search.DefaultThreshold*search.DefaultConfidenceMultiplier {
-		return nil, fmt.Sprintf("%v -> suppressed (low confidence, top score %d)", tokens, hits[0].Score), nil
+		return nil, fmt.Sprintf("%v -> suppressed (low confidence, top score %d)", tokens, hits[0].Score)
 	}
 	if len(hits[0].Matched) < 2 && hits[0].Score < search.DefaultSingleTokenFloor {
-		return nil, fmt.Sprintf("%v -> suppressed (single-token weak match, score %d)", tokens, hits[0].Score), nil
+		return nil, fmt.Sprintf("%v -> suppressed (single-token weak match, score %d)", tokens, hits[0].Score)
 	}
 
 	names := make([]string, len(hits))
 	for i, r := range hits {
 		names[i] = fmt.Sprintf("%s(%d)", r.Entry.Name, r.Score)
 	}
-	return hits, fmt.Sprintf("%v -> %s", tokens, strings.Join(names, ", ")), nil
+	return hits, fmt.Sprintf("%v -> %s", tokens, strings.Join(names, ", "))
 }
 
 // --- Helpers ---
@@ -201,9 +200,12 @@ func anyToString(v any) string {
 	}
 }
 
-func formatContext(results []search.ScoredEntry, mode string) string {
+func formatContext(results []search.ScoredEntry, mode, header string) string {
 	var b strings.Builder
-	b.WriteString(hookContextHeader)
+	b.WriteString(contextOpenTag)
+	b.WriteByte('\n')
+	b.WriteString(header)
+	b.WriteByte('\n')
 	prefix := homePrefix()
 	for _, r := range results {
 		if mode == "compact" {
@@ -215,7 +217,8 @@ func formatContext(results []search.ScoredEntry, mode string) string {
 			fmt.Fprintf(&b, " [matched: %s]", strings.Join(r.Matched, ", "))
 		}
 	}
-	b.WriteString(hookContextFooter)
+	b.WriteByte('\n')
+	b.WriteString(contextCloseTag)
 	return b.String()
 }
 

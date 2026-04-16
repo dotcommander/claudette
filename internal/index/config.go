@@ -5,11 +5,37 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Config holds claudette's runtime configuration.
 type Config struct {
-	SourceDirs []string `json:"source_dirs,omitempty"`
+	SourceDirs    []string `json:"source_dirs,omitempty"`
+	ContextHeader string   `json:"context_header,omitempty"`
+}
+
+// defaultContextHeader is the triage instruction injected between the
+// <related_skills_knowledge> open and close tags. Users may override it by
+// setting "context_header" in ~/.config/claudette/config.json. The tags
+// themselves are protocol markers and are not user-configurable.
+const defaultContextHeader = "Scan first 10 lines of each file. Only read full files that are clearly relevant."
+
+// DefaultContextHeader returns the built-in triage instruction written to
+// fresh configs. Callers that need the same default at runtime without a
+// loaded Config should use this rather than duplicating the string.
+func DefaultContextHeader() string {
+	return defaultContextHeader
+}
+
+// ContextHeader returns the configured context header, or the built-in
+// default when the config omits it. Callers should use this accessor rather
+// than reading Config.ContextHeader directly so the default is honoured
+// consistently.
+func (c Config) ContextHeaderOrDefault() string {
+	if strings.TrimSpace(c.ContextHeader) == "" {
+		return defaultContextHeader
+	}
+	return c.ContextHeader
 }
 
 // configFilePath returns ~/.config/claudette/<name>.
