@@ -1,0 +1,14 @@
+version: "2"
+
+linters:
+  exclusions:
+    rules:
+      # Project policy: trusted-path file ops are not security findings.
+      # Ref: ~/.claude/plugins/cache/dotcommander/dc/2.2.23/instructions/rules/4-go.md
+      - linters:
+          - gosec
+        text: "G301|G302|G304|G306"
+      # Writer errors to stdout/stderr (fmt.Fprint*) are not actionable.
+      - linters:
+          - errcheck
+        source: "fmt\\.Fprint(ln|f)?\\("
