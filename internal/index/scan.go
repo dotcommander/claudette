@@ -88,12 +88,15 @@ func pluginDirs(data []byte) []string {
 func walkMdFiles(dirs []string, fn func(path string, info fs.FileInfo, sourceDir string)) error {
 	for _, dir := range dirs {
 		if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || filepath.Ext(path) != ".md" {
 				return nil
 			}
 			info, err := d.Info()
 			if err != nil {
-				return nil
+				return err
 			}
 			fn(path, info, dir)
 			return nil

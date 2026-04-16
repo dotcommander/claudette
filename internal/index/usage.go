@@ -33,7 +33,7 @@ func AppendUsageLog(records []UsageRecord) error {
 	return appendUsageLogWithPath(path, records)
 }
 
-func appendUsageLogWithPath(path string, records []UsageRecord) error {
+func appendUsageLogWithPath(path string, records []UsageRecord) (err error) {
 	if len(records) == 0 {
 		return nil
 	}
@@ -44,7 +44,11 @@ func appendUsageLogWithPath(path string, records []UsageRecord) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	bw := bufio.NewWriter(f)
 	for _, r := range records {
@@ -72,7 +76,7 @@ func parseUsageLogWithPath(path string) ([]UsageRecord, error) {
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var records []UsageRecord
 	sc := bufio.NewScanner(f)
