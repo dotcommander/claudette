@@ -30,10 +30,10 @@ func AppendUsageLog(records []UsageRecord) error {
 	if err != nil {
 		return err
 	}
-	return appendUsageLogTo(path, records)
+	return appendUsageLogWithPath(path, records)
 }
 
-func appendUsageLogTo(path string, records []UsageRecord) error {
+func appendUsageLogWithPath(path string, records []UsageRecord) error {
 	if len(records) == 0 {
 		return nil
 	}
@@ -48,6 +48,7 @@ func appendUsageLogTo(path string, records []UsageRecord) error {
 
 	bw := bufio.NewWriter(f)
 	for _, r := range records {
+		//nolint:errcheck // disk errors surfaced by Flush()
 		fmt.Fprintf(bw, "%d\t%s\t%d\n", r.Timestamp.Unix(), r.Name, r.Score)
 	}
 	return bw.Flush()
@@ -60,10 +61,10 @@ func ParseUsageLog() ([]UsageRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseUsageLogFrom(path)
+	return parseUsageLogWithPath(path)
 }
 
-func parseUsageLogFrom(path string) ([]UsageRecord, error) {
+func parseUsageLogWithPath(path string) ([]UsageRecord, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -113,9 +114,9 @@ func TruncateUsageLog() error {
 	if err != nil {
 		return err
 	}
-	return truncateUsageLogAt(path)
+	return truncateUsageLogWithPath(path)
 }
 
-func truncateUsageLogAt(path string) error {
+func truncateUsageLogWithPath(path string) error {
 	return os.Truncate(path, 0)
 }

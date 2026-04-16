@@ -17,6 +17,16 @@ type SearchOpts struct {
 	Limit     int
 }
 
+// NewSearchOpts returns SearchOpts populated with package defaults.
+// Callers (CLI flag binding, programmatic consumers) overlay values on top.
+func NewSearchOpts() SearchOpts {
+	return SearchOpts{
+		Format:    "text",
+		Threshold: search.DefaultThreshold,
+		Limit:     search.DefaultLimit,
+	}
+}
+
 // Search tokenizes the prompt, scores against the index, and writes results.
 func Search(w io.Writer, prompt, filter string, opts SearchOpts) error {
 	idx, err := LoadIndex()

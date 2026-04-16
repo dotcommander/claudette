@@ -7,7 +7,6 @@ import (
 
 	"github.com/dotcommander/claudette/internal/actions"
 	"github.com/dotcommander/claudette/internal/hook"
-	"github.com/dotcommander/claudette/internal/search"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +49,7 @@ func fastPath(cmd string) (bool, error) {
 }
 
 func rootCmd() *cobra.Command {
-	var opts actions.SearchOpts
+	opts := actions.NewSearchOpts()
 
 	root := &cobra.Command{
 		Use:     "claudette",
@@ -60,9 +59,9 @@ func rootCmd() *cobra.Command {
 	// Cobra auto-registers --version when Version is set; keep output terse.
 	root.SetVersionTemplate("{{.Version}}\n")
 
-	root.PersistentFlags().StringVar(&opts.Format, "format", "text", "Output format: text or json")
-	root.PersistentFlags().IntVar(&opts.Threshold, "threshold", search.DefaultThreshold, "Minimum score to include in results")
-	root.PersistentFlags().IntVar(&opts.Limit, "limit", search.DefaultLimit, "Maximum number of results")
+	root.PersistentFlags().StringVar(&opts.Format, "format", opts.Format, "Output format: text or json")
+	root.PersistentFlags().IntVar(&opts.Threshold, "threshold", opts.Threshold, "Minimum score to include in results")
+	root.PersistentFlags().IntVar(&opts.Limit, "limit", opts.Limit, "Maximum number of results")
 
 	root.AddCommand(
 		newSearchCmd(&opts, ""),

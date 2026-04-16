@@ -12,37 +12,19 @@ import (
 // SourceDirs returns the directories to scan, combining user-configured
 // source_dirs (from config.json) with defaults and plugin directories.
 func SourceDirs() ([]string, error) {
-	seen := make(map[string]struct{})
-	var dirs []string
-
-	add := func(p string) {
-		if _, ok := seen[p]; ok {
-			return
-		}
-		if _, err := os.Stat(p); err != nil {
-			return
-		}
-		seen[p] = struct{}{}
-		dirs = append(dirs, p)
-	}
-
 	// User-configured dirs take priority.
 	cfg, err := LoadConfig()
 	if err != nil {
 		return nil, err
 	}
-	for _, d := range cfg.SourceDirs {
-		add(d)
-	}
+	candidates := append([]string(nil), cfg.SourceDirs...)
 
 	// Always include defaults (existing dirs only).
 	defaults, err := DefaultSourceDirs()
 	if err != nil {
 		return nil, err
 	}
-	for _, d := range defaults {
-		add(d)
-	}
+	candidates = append(candidates, defaults...)
 
 	// Plugin-installed components.
 	home, err := os.UserHomeDir()
@@ -50,12 +32,29 @@ func SourceDirs() ([]string, error) {
 		return nil, err
 	}
 	pluginsFile := filepath.Join(home, ".claude", "plugins", "installed_plugins.json")
-	data, err := os.ReadFile(pluginsFile)
-	if err == nil {
-		addPluginDirs(data, add)
+	if data, err := os.ReadFile(pluginsFile); err == nil {
+		candidates = append(candidates, pluginDirs(data)...)
 	}
 
-	return dirs, nil
+	return deduplicateDirs(candidates), nil
+}
+
+// deduplicateDirs returns dirs in input order, keeping only existing paths
+// and dropping duplicates (by path string).
+func deduplicateDirs(dirs []string) []string {
+	seen := make(map[string]struct{}, len(dirs))
+	out := make([]string, 0, len(dirs))
+	for _, p := range dirs {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
 }
 
 type installedPlugins struct {
@@ -64,21 +63,25 @@ type installedPlugins struct {
 	} `json:"plugins"`
 }
 
-func addPluginDirs(data []byte, add func(string)) {
+// pluginDirs parses installed_plugins.json and returns all candidate plugin
+// component directories (skills/agents/commands under each install path).
+func pluginDirs(data []byte) []string {
 	var installed installedPlugins
 	if err := json.Unmarshal(data, &installed); err != nil {
-		return
+		return nil
 	}
+	var dirs []string
 	for _, installs := range installed.Plugins {
 		for _, inst := range installs {
 			if inst.InstallPath == "" {
 				continue
 			}
 			for _, sub := range []string{"skills", "agents", "commands"} {
-				add(filepath.Join(inst.InstallPath, sub))
+				dirs = append(dirs, filepath.Join(inst.InstallPath, sub))
 			}
 		}
 	}
+	return dirs
 }
 
 // walkMdFiles walks all source directories and calls fn for each .md file found.

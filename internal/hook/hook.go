@@ -18,6 +18,14 @@ import (
 // maxStdinBytes caps stdin reads to prevent unbounded memory use.
 const maxStdinBytes = 1 << 20 // 1MB
 
+// hookContextHeader and hookContextFooter wrap the additional-context block
+// emitted to Claude Code. The header instructs the model how to triage the
+// surfaced entries; the footer closes the XML tag.
+const (
+	hookContextHeader = "<related_skills_knowledge>\nScan first 10 lines of each file. Only read full files that are clearly relevant.\n"
+	hookContextFooter = "\n</related_skills_knowledge>"
+)
+
 // --- Protocol types ---
 
 // hookInput matches Claude Code's UserPromptSubmit stdin JSON.
@@ -195,7 +203,7 @@ func anyToString(v any) string {
 
 func formatContext(results []search.ScoredEntry, mode string) string {
 	var b strings.Builder
-	b.WriteString("<related_skills_knowledge>\nScan first 10 lines of each file. Only read full files that are clearly relevant.\n")
+	b.WriteString(hookContextHeader)
 	prefix := homePrefix()
 	for _, r := range results {
 		if mode == "compact" {
@@ -207,7 +215,7 @@ func formatContext(results []search.ScoredEntry, mode string) string {
 			fmt.Fprintf(&b, " [matched: %s]", strings.Join(r.Matched, ", "))
 		}
 	}
-	b.WriteString("\n</related_skills_knowledge>")
+	b.WriteString(hookContextFooter)
 	return b.String()
 }
 

@@ -18,7 +18,7 @@ func TestAppendUsageLog_CreatesFile(t *testing.T) {
 		{Timestamp: now, Name: "entry-a", Score: 10},
 		{Timestamp: now, Name: "entry-b", Score: 5},
 	}
-	if err := appendUsageLogTo(path, records); err != nil {
+	if err := appendUsageLogWithPath(path, records); err != nil {
 		t.Fatalf("append: %v", err)
 	}
 
@@ -40,14 +40,14 @@ func TestAppendUsageLog_Appends(t *testing.T) {
 	r1 := []UsageRecord{{Timestamp: now, Name: "first", Score: 3}}
 	r2 := []UsageRecord{{Timestamp: now, Name: "second", Score: 7}}
 
-	if err := appendUsageLogTo(path, r1); err != nil {
+	if err := appendUsageLogWithPath(path, r1); err != nil {
 		t.Fatalf("first append: %v", err)
 	}
-	if err := appendUsageLogTo(path, r2); err != nil {
+	if err := appendUsageLogWithPath(path, r2); err != nil {
 		t.Fatalf("second append: %v", err)
 	}
 
-	records, err := parseUsageLogFrom(path)
+	records, err := parseUsageLogWithPath(path)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestAppendUsageLog_Appends(t *testing.T) {
 func TestAppendUsageLog_EmptySlice(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "usage.log")
-	if err := appendUsageLogTo(path, nil); err != nil {
+	if err := appendUsageLogWithPath(path, nil); err != nil {
 		t.Fatalf("append nil: %v", err)
 	}
 	// File should not be created for empty input.
@@ -74,7 +74,7 @@ func TestAppendUsageLog_EmptySlice(t *testing.T) {
 func TestParseUsageLog_Missing(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "nonexistent.log")
-	records, err := parseUsageLogFrom(path)
+	records, err := parseUsageLogWithPath(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestParseUsageLog_MalformedLines(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	records, err := parseUsageLogFrom(path)
+	records, err := parseUsageLogWithPath(path)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -128,15 +128,15 @@ func TestTruncateUsageLog(t *testing.T) {
 	now := time.Now()
 
 	records := []UsageRecord{{Timestamp: now, Name: "entry", Score: 5}}
-	if err := appendUsageLogTo(path, records); err != nil {
+	if err := appendUsageLogWithPath(path, records); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := truncateUsageLogAt(path); err != nil {
+	if err := truncateUsageLogWithPath(path); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 
-	parsed, err := parseUsageLogFrom(path)
+	parsed, err := parseUsageLogWithPath(path)
 	if err != nil {
 		t.Fatalf("parse after truncate: %v", err)
 	}
@@ -154,11 +154,11 @@ func TestRoundTrip(t *testing.T) {
 		{Timestamp: now, Name: "hook-reload", Score: 12},
 		{Timestamp: now, Name: "go-formatter", Score: 8},
 	}
-	if err := appendUsageLogTo(path, original); err != nil {
+	if err := appendUsageLogWithPath(path, original); err != nil {
 		t.Fatal(err)
 	}
 
-	parsed, err := parseUsageLogFrom(path)
+	parsed, err := parseUsageLogWithPath(path)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

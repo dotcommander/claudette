@@ -7,36 +7,6 @@ import (
 	"path/filepath"
 )
 
-// atomicWriteFile writes data to path via temp-file-then-rename.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) (retErr error) {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".claudette-tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		if retErr != nil {
-			tmp.Close()
-			os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpPath, perm); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
-}
-
 // Config holds claudette's runtime configuration.
 type Config struct {
 	SourceDirs []string `json:"source_dirs,omitempty"`
@@ -91,14 +61,6 @@ func LoadConfig() (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
-}
-
-// writeJSONFile creates parent directories and atomically writes data to path.
-func writeJSONFile(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return atomicWriteFile(path, data, 0o644)
 }
 
 // SaveConfig writes config to disk via atomic temp-file-then-rename.
