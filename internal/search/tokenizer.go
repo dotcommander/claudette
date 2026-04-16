@@ -1,9 +1,19 @@
 package search
 
 import (
+	"regexp"
 	"strings"
 	"sync"
 	"unicode"
+)
+
+var (
+	// rePathLike matches whitespace-separated tokens containing a slash, e.g. /var/log/app.log.
+	// Replaced before tokenization to prevent directory components flooding query terms.
+	rePathLike = regexp.MustCompile(`\S*/\S*`)
+
+	// reXMLTag matches XML/HTML-ish tags, e.g. <agentId>. Content is preserved; tag names are dropped.
+	reXMLTag = regexp.MustCompile(`<[^>]+>`)
 )
 
 // StopSet is a set of words to filter during tokenization.
@@ -15,10 +25,11 @@ func (s StopSet) Contains(word string) bool {
 	return ok
 }
 
-var (
-	defaultStops     StopSet
-	defaultStopsOnce sync.Once
-)
+//nolint:gochecknoglobals // immutable lookup table
+var defaultStops StopSet
+
+//nolint:gochecknoglobals // immutable lookup table
+var defaultStopsOnce sync.Once
 
 // DefaultStopWords returns the built-in stop word list.
 func DefaultStopWords() StopSet {
@@ -62,6 +73,13 @@ func DefaultStopWords() StopSet {
 // (preserving internal hyphens), deduplicates, and removes stop words
 // and single-char tokens.
 func Tokenize(prompt string, stops StopSet) []string {
+	// Pre-strip XML-ish tags first (keeps content, removes tag names), then
+	// path-like tokens (containing /). Tag strip must precede path strip because
+	// closing tags (</tag>) contain "/" and would otherwise be treated as paths,
+	// swallowing tag content along with them.
+	prompt = reXMLTag.ReplaceAllString(prompt, " ")
+	prompt = rePathLike.ReplaceAllString(prompt, " ")
+
 	lower := strings.ToLower(prompt)
 
 	fields := strings.FieldsFunc(lower, func(r rune) bool {

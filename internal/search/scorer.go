@@ -16,6 +16,17 @@ type ScoredEntry struct {
 	Matched []string    `json:"matched"`
 }
 
+// matchTerm records a matched token and its score contribution.
+type matchTerm struct {
+	term  string
+	delta float64
+}
+
+// minIDFForMatch is the minimum per-term IDF contribution required for a result
+// to be included. Entries that match only via very common (low-IDF) terms are suppressed.
+// Bigram matches bypass this gate — positional evidence is already discriminating.
+const minIDFForMatch = 1.0
+
 // bm25 computes the BM25 term score for a single keyword occurrence.
 // weight is the field weight (name=3, title=2, tag=2, desc=1).
 // idf is the dampened inverse document frequency multiplier.
@@ -46,14 +57,20 @@ func Score(entries []index.Entry, tokens []string, threshold int, idf map[string
 	var results []ScoredEntry
 
 	for _, entry := range entries {
-		score, matched := scoreEntry(entry, tokens, promptBigrams, idf, avgdl)
-		if score >= threshF {
-			results = append(results, ScoredEntry{
-				Entry:   entry,
-				Score:   int(math.Round(score)),
-				Matched: dedup(matched),
-			})
+		score, matchTerms, bigramHit, maxIDF := scoreEntry(entry, tokens, promptBigrams, idf, avgdl)
+		if score < threshF {
+			continue
 		}
+		// IDF gate: suppress entries matched only via common terms, unless a bigram
+		// hit is present (positional evidence) or no IDF map is configured.
+		if idf != nil && !bigramHit && maxIDF < minIDFForMatch {
+			continue
+		}
+		results = append(results, ScoredEntry{
+			Entry:   entry,
+			Score:   int(math.Round(score)),
+			Matched: sortedDedupMatchTerms(matchTerms),
+		})
 	}
 
 	slices.SortFunc(results, func(a, b ScoredEntry) int {
@@ -66,17 +83,24 @@ func Score(entries []index.Entry, tokens []string, threshold int, idf map[string
 	return results
 }
 
-// scoreEntry computes the score and matched tokens for a single entry.
-func scoreEntry(entry index.Entry, tokens []string, promptBigrams []string, idf map[string]float64, avgdl float64) (float64, []string) {
+// scoreEntry computes the score and matched terms for a single entry.
+// Returns: total score, matched terms with deltas, whether any bigram matched, max per-term IDF contribution.
+func scoreEntry(entry index.Entry, tokens []string, promptBigrams []string, idf map[string]float64, avgdl float64) (float64, []matchTerm, bool, float64) {
 	var score float64
-	var matched []string
+	var terms []matchTerm
+	var maxIDF float64
+	var bigramHit bool
 
 	dl := float64(len(entry.Keywords))
 	for _, tok := range tokens {
 		delta, hit := scoreToken(entry, tok, idf, dl, avgdl)
 		score += delta
 		if hit {
-			matched = append(matched, tok)
+			terms = append(terms, matchTerm{term: tok, delta: delta})
+			// Track max per-term IDF multiplier for the IDF gate.
+			if v := idfMul(idf, tok); v > maxIDF {
+				maxIDF = v
+			}
 		}
 	}
 
@@ -90,12 +114,13 @@ func scoreEntry(entry index.Entry, tokens []string, promptBigrams []string, idf 
 		for _, bg := range promptBigrams {
 			if _, ok := entryBigramSet[bg]; ok {
 				score += 3.0
-				matched = append(matched, bg)
+				terms = append(terms, matchTerm{term: bg, delta: 3.0})
+				bigramHit = true
 			}
 		}
 	}
 
-	return score, matched
+	return score, terms, bigramHit, maxIDF
 }
 
 // scoreToken returns the score contribution and whether the token matched.
@@ -177,14 +202,31 @@ func idfMul(idf map[string]float64, token string) float64 {
 	return 1.0
 }
 
-func dedup(ss []string) []string {
-	seen := make(map[string]struct{}, len(ss))
-	out := make([]string, 0, len(ss))
-	for _, s := range ss {
-		if _, ok := seen[s]; !ok {
-			seen[s] = struct{}{}
-			out = append(out, s)
+// sortedDedupMatchTerms deduplicates matched terms, keeping the highest delta
+// per term, then sorts by delta descending with alphabetical tiebreak.
+func sortedDedupMatchTerms(terms []matchTerm) []string {
+	best := make(map[string]float64, len(terms))
+	for _, mt := range terms {
+		if d, ok := best[mt.term]; !ok || mt.delta > d {
+			best[mt.term] = mt.delta
 		}
+	}
+
+	deduped := make([]matchTerm, 0, len(best))
+	for term, delta := range best {
+		deduped = append(deduped, matchTerm{term: term, delta: delta})
+	}
+
+	slices.SortFunc(deduped, func(a, b matchTerm) int {
+		if a.delta != b.delta {
+			return cmp.Compare(b.delta, a.delta) // descending
+		}
+		return cmp.Compare(a.term, b.term) // alphabetical tiebreak
+	})
+
+	out := make([]string, len(deduped))
+	for i, mt := range deduped {
+		out[i] = mt.term
 	}
 	return out
 }

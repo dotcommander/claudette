@@ -46,6 +46,7 @@ func TestScore(t *testing.T) {
 		tokens    []string
 		threshold int
 		idf       map[string]float64
+		autoIDF   bool   // if true, ComputeIDF(entries) is used instead of idf
 		wantNil   bool   // true when nil result expected
 		wantCount int    // expected result length (when wantNil=false)
 		wantFirst string // expected first result Name (when wantCount >= 1)
@@ -112,12 +113,10 @@ func TestScore(t *testing.T) {
 			wantFirst: "go-entry",
 		},
 		{
-			// Case 5: plural +s normalization — "goroutines" should match keyword "goroutine"
-			// via the tok+"s" path (entry.Keywords["goroutines"]).
-			// We store "goroutines" as the keyword; prompt sends "goroutine".
-			// Wait — scorer does: if Keywords[tok+"s"] match → plural strip.
-			// Token = "goroutines", check Keywords["goroutines"+"s"] no, then
-			// CutSuffix("goroutines","s") → "goroutine", check Keywords["goroutine"]. YES.
+			// Case 5: plural strip-s normalization — token "goroutines" (plural) should
+			// match keyword "goroutine" (singular) via the CutSuffix path.
+			// scoreToken: Keywords["goroutines"+"s"] miss → CutSuffix("goroutines","s")
+			// → "goroutine" → Keywords["goroutine"] hit. Score = weight × 0.9.
 			name: "plural strip -s matches singular keyword",
 			entries: []index.Entry{
 				makeEntry("gr-entry", "Goroutine Entry", "go",
@@ -236,7 +235,8 @@ func TestScore(t *testing.T) {
 			}(),
 			tokens:    []string{"rare"},
 			threshold: 1,
-			idf:       nilIDF, // overwritten below via tc.name guard before Score is called
+			idf:       nilIDF,
+			autoIDF:   true, // ComputeIDF(entries) applied before Score is called
 			wantNil:   false,
 			wantCount: 1,
 			wantFirst: "rare-holder",
@@ -282,8 +282,8 @@ func TestScore(t *testing.T) {
 			t.Parallel()
 
 			idf := tc.idf
-			// For the IDF test case we compute it from the actual entries.
-			if tc.name == "IDF rare term scores higher than common term" {
+			// For test cases that need IDF weighting, compute it from the actual entries.
+			if tc.autoIDF {
 				idf = index.ComputeIDF(tc.entries)
 			}
 
@@ -321,6 +321,64 @@ func TestScore(t *testing.T) {
 					tc.wantScore, results[0].Score, results[0].Entry.Name)
 			}
 		})
+	}
+}
+
+func TestScore_SuppressesLowIDFOnlyMatches(t *testing.T) {
+	t.Parallel()
+
+	// Build a corpus where the query token "common" appears in every entry.
+	// ComputeIDF will assign it a very low IDF (close to 0 — log(N/df) with df≈N).
+	// A doc that matches only via "common" should be suppressed by the IDF gate.
+	entries := []index.Entry{
+		makeEntry("target", "Target Entry", "go", map[string]int{"common": 3}, nil),
+		makeEntry("e2", "Entry 2", "go", map[string]int{"common": 3}, nil),
+		makeEntry("e3", "Entry 3", "go", map[string]int{"common": 3}, nil),
+		makeEntry("e4", "Entry 4", "go", map[string]int{"common": 3}, nil),
+		makeEntry("e5", "Entry 5", "go", map[string]int{"common": 3}, nil),
+	}
+
+	idf := index.ComputeIDF(entries)
+	results := Score(entries, []string{"common"}, 1, idf, 0)
+
+	// All entries match only via a very-common term — all should be suppressed.
+	if len(results) != 0 {
+		t.Errorf("expected 0 results after IDF gate for low-IDF-only match, got %d", len(results))
+		for i, r := range results {
+			t.Logf("  [%d] name=%s score=%d matched=%v", i, r.Entry.Name, r.Score, r.Matched)
+		}
+	}
+}
+
+func TestScore_MatchedSortedByContribution(t *testing.T) {
+	t.Parallel()
+
+	// Build an entry where "goroutine" has weight 3 and "channel" has weight 1.
+	// With nilIDF (defaults to 1.0), goroutine contributes 3× more than channel.
+	// The IDF gate is bypassed (idf==nil), so results appear unconditionally.
+	entries := []index.Entry{
+		makeEntry("target", "Target Entry", "go",
+			map[string]int{"goroutine": 3, "channel": 1}, nil),
+	}
+
+	results := Score(entries, []string{"channel", "goroutine"}, 1, nil, 0)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	matched := results[0].Matched
+	if len(matched) < 2 {
+		t.Fatalf("expected at least 2 matched terms, got %v", matched)
+	}
+
+	// goroutine (delta=3) should sort before channel (delta=1).
+	if matched[0] != "goroutine" {
+		t.Errorf("expected Matched[0]=%q (highest delta), got %q; full matched=%v",
+			"goroutine", matched[0], matched)
+	}
+	if matched[1] != "channel" {
+		t.Errorf("expected Matched[1]=%q (lower delta), got %q; full matched=%v",
+			"channel", matched[1], matched)
 	}
 }
 
