@@ -42,9 +42,9 @@ func fastPath(cmd string) (bool, error) {
 		return true, hook.RunPostToolUseFailure()
 	case "post-tool-use":
 		// Back-compat: pre-v0.6.0 installs wrote this subcommand into
-		// settings.json. Existing sessions keep working until the user
-		// re-runs `claudette install`, which rewrites the hook entry.
-		return true, hook.RunPostToolUseFailure()
+		// settings.json. Silent no-op — run `claudette install` to migrate
+		// to the PostToolUseFailure hook (fires on failure only, not all tools).
+		return true, nil
 	}
 	return false, nil
 }
