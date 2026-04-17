@@ -438,6 +438,50 @@ func TestScoreTop_LimitCapping(t *testing.T) {
 	}
 }
 
+// TestScore_AliasOnlyTokensMatch verifies that an entry whose keywords were
+// populated solely from alias phrases (at index time) is still matched by the
+// scorer when the prompt contains only alias-derived tokens.
+func TestScore_AliasOnlyTokensMatch(t *testing.T) {
+	t.Parallel()
+
+	// Simulate an entry whose "pulling" and "extracting" keywords came from
+	// aliases — they would not appear in name, title, or category.
+	entry := makeEntry(
+		"maps-keys-returns-iterator",
+		"maps.Keys returns iterator, not slice",
+		"go",
+		// keywords a real parseEntry would produce for the alias fixture
+		map[string]int{
+			"maps":       3, // from name
+			"keys":       3, // from name
+			"returns":    3, // from name
+			"iterator":   3, // from name
+			"slice":      2, // from title
+			"pulling":    1, // from alias: "pulling keys out of a go map"
+			"extracting": 1, // from alias: "extracting map keys"
+			"seq":        1, // from alias: "iter.Seq instead of slice"
+		},
+		nil,
+	)
+
+	// Tokens from a prompt like "pulling just the keys out of a 1.22 map" —
+	// only alias-derived tokens should be enough to surface the entry.
+	results := Score(
+		[]index.Entry{entry},
+		[]string{"pulling", "keys"},
+		2, // threshold
+		nil,
+		0,
+	)
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result from alias-only tokens, got %d", len(results))
+	}
+	if results[0].Entry.Name != "maps-keys-returns-iterator" {
+		t.Errorf("expected maps-keys-returns-iterator, got %q", results[0].Entry.Name)
+	}
+}
+
 func TestHasStemMatch(t *testing.T) {
 	t.Parallel()
 

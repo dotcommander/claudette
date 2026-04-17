@@ -46,6 +46,14 @@ func parseEntry(path, sourceDir string) (Entry, bool) {
 		add(tw, 2)
 	}
 
+	// Aliases: natural-language synonyms that feed into keyword matching.
+	// Each alias phrase is tokenized and its tokens added at weight 1.
+	for _, alias := range fm.Aliases {
+		for _, tok := range splitWords(alias) {
+			add(tok, 1)
+		}
+	}
+
 	return Entry{
 		Type:     entryType,
 		Name:     name,
@@ -66,14 +74,14 @@ func classifyType(path, sourceDir string) EntryType {
 		candidates = append(candidates, parts[0])
 	}
 	for _, name := range candidates {
-		switch name {
-		case "kb":
+		switch {
+		case name == "kb":
 			return TypeKB
-		case "skills":
+		case name == "skills":
 			return TypeSkill
-		case "agents":
+		case name == "agents":
 			return TypeAgent
-		case "commands":
+		case name == "commands" || strings.HasSuffix(name, "-commands"):
 			return TypeCommand
 		}
 	}

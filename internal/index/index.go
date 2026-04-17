@@ -10,17 +10,18 @@ import (
 )
 
 // CurrentVersion is the index schema version; bump when Entry shape changes.
-const CurrentVersion = 3
+const CurrentVersion = 4
 
 // Index is the on-disk cache of all scanned entries.
 type Index struct {
-	Version     int                `json:"version"`
-	BuildTime   time.Time          `json:"build_time"`
-	SourceMtime time.Time          `json:"source_mtime"`
-	FileCount   int                `json:"file_count"`
-	Entries     []Entry            `json:"entries"`
-	IDF         map[string]float64 `json:"idf,omitzero"`  // inverse document frequency per keyword
-	AvgFieldLen float64            `json:"avg_field_len"` // average number of keywords per entry (for BM25)
+	Version      int                `json:"version"`
+	BuildTime    time.Time          `json:"build_time"`
+	SourceMtime  time.Time          `json:"source_mtime"`
+	FileCount    int                `json:"file_count"`
+	AliasesMtime time.Time          `json:"aliases_mtime,omitzero"` // mtime of aliases.yaml at build time (zero if absent)
+	Entries      []Entry            `json:"entries"`
+	IDF          map[string]float64 `json:"idf,omitzero"`  // inverse document frequency per keyword
+	AvgFieldLen  float64            `json:"avg_field_len"` // average number of keywords per entry (for BM25)
 }
 
 // IndexPath returns ~/.config/claudette/index.json.
@@ -64,14 +65,28 @@ func buildIndex(sourceDirs []string) (Index, error) {
 	if err != nil {
 		return Index{}, fmt.Errorf("scan failed: %w", err)
 	}
+
+	// Load user alias overrides and merge them before computing IDF/avgdl,
+	// so the final keyword set reflects all aliases (frontmatter + overrides).
+	overridesPath, err := aliasOverridesPath()
+	if err != nil {
+		return Index{}, err
+	}
+	overrides, aliasesMtime, err := loadAliasOverrides(overridesPath)
+	if err != nil {
+		return Index{}, err
+	}
+	applyAliasOverrides(scan.Entries, overrides)
+
 	return Index{
-		Version:     CurrentVersion,
-		BuildTime:   time.Now(),
-		SourceMtime: scan.MaxMtime,
-		FileCount:   scan.FileCount,
-		Entries:     scan.Entries,
-		IDF:         ComputeIDF(scan.Entries),
-		AvgFieldLen: ComputeAvgFieldLen(scan.Entries),
+		Version:      CurrentVersion,
+		BuildTime:    time.Now(),
+		SourceMtime:  scan.MaxMtime,
+		FileCount:    scan.FileCount,
+		AliasesMtime: aliasesMtime,
+		Entries:      scan.Entries,
+		IDF:          ComputeIDF(scan.Entries),
+		AvgFieldLen:  ComputeAvgFieldLen(scan.Entries),
 	}, nil
 }
 
@@ -88,6 +103,8 @@ func ForceRebuild(sourceDirs []string) (Index, error) {
 }
 
 // NeedsRebuild checks whether the cached index is stale relative to source dirs.
+// It also accounts for changes to ~/.config/claudette/aliases.yaml — both
+// modification (mtime change) and deletion/creation (zero-vs-nonzero mtime).
 func NeedsRebuild(cached Index, sourceDirs []string) bool {
 	if cached.Version != CurrentVersion {
 		return true
@@ -108,7 +125,19 @@ func NeedsRebuild(cached Index, sourceDirs []string) bool {
 	if count != cached.FileCount {
 		return true
 	}
-	return maxMtime.After(cached.SourceMtime)
+	if maxMtime.After(cached.SourceMtime) {
+		return true
+	}
+
+	// Check aliases.yaml staleness: compare current mtime against cached.
+	// A zero mtime means "file absent". If existence or mtime changed, rebuild.
+	var currentAliasesMtime time.Time
+	if p, err := aliasOverridesPath(); err == nil {
+		if info, err := os.Stat(p); err == nil {
+			currentAliasesMtime = info.ModTime()
+		}
+	}
+	return !currentAliasesMtime.Equal(cached.AliasesMtime)
 }
 
 // ComputeAvgFieldLen returns the average number of keywords per entry.

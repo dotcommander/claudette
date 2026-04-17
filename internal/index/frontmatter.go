@@ -11,6 +11,7 @@ type Frontmatter struct {
 	Name        string   `yaml:"name"`
 	Description string   `yaml:"description"`
 	Tags        []string `yaml:"tags"`
+	Aliases     []string `yaml:"aliases"`
 }
 
 var fmDelimiter = []byte("---\n")

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -63,8 +64,86 @@ type installedPlugins struct {
 	} `json:"plugins"`
 }
 
+// pluginManifest represents the relevant fields of .claude-plugin/plugin.json.
+// Commands may be a single path string or a list of path strings.
+type pluginManifest struct {
+	Commands json.RawMessage `json:"commands"`
+	Skills   json.RawMessage `json:"skills"`
+}
+
+// pluginSubdirs returns all component directories for a single plugin install
+// path. It reads .claude-plugin/plugin.json to discover declared directories,
+// falling back to the conventional "skills", "agents", "commands" if the
+// manifest is absent or unparseable.
+func pluginSubdirs(installPath string) []string {
+	manifestPath := filepath.Join(installPath, ".claude-plugin", "plugin.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		// No manifest — use conventional dirs.
+		return conventionalSubdirs(installPath)
+	}
+
+	var m pluginManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return conventionalSubdirs(installPath)
+	}
+
+	var dirs []string
+
+	// skills: string or array of strings.
+	dirs = append(dirs, resolveManifestPaths(installPath, m.Skills)...)
+
+	// agents: convention only (not declared in manifest spec).
+	dirs = append(dirs, filepath.Join(installPath, "agents"))
+
+	// commands: string or array of strings.
+	dirs = append(dirs, resolveManifestPaths(installPath, m.Commands)...)
+
+	return dirs
+}
+
+// resolveManifestPaths decodes a JSON field that may be a string or []string,
+// resolves each value as a path relative to installPath, and returns the results.
+func resolveManifestPaths(installPath string, raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var paths []string
+	// Try []string first.
+	if err := json.Unmarshal(raw, &paths); err != nil {
+		// Try single string.
+		var s string
+		if err2 := json.Unmarshal(raw, &s); err2 != nil {
+			return nil
+		}
+		paths = []string{s}
+	}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		// Strip leading "./" if present.
+		p = strings.TrimPrefix(p, "./")
+		// Strip trailing "/" if present.
+		p = strings.TrimSuffix(p, "/")
+		out = append(out, filepath.Join(installPath, p))
+	}
+	return out
+}
+
+// conventionalSubdirs returns the standard skills/agents/commands paths for a
+// plugin that has no plugin.json manifest.
+func conventionalSubdirs(installPath string) []string {
+	subs := []string{"skills", "agents", "commands"}
+	out := make([]string, 0, len(subs))
+	for _, s := range subs {
+		out = append(out, filepath.Join(installPath, s))
+	}
+	return out
+}
+
 // pluginDirs parses installed_plugins.json and returns all candidate plugin
-// component directories (skills/agents/commands under each install path).
+// component directories. It reads each plugin's manifest to discover declared
+// command/skill directories, so plugins that split commands across multiple
+// subdirectories (e.g. dev-commands, session-commands) are fully indexed.
 func pluginDirs(data []byte) []string {
 	var installed installedPlugins
 	if err := json.Unmarshal(data, &installed); err != nil {
@@ -76,9 +155,7 @@ func pluginDirs(data []byte) []string {
 			if inst.InstallPath == "" {
 				continue
 			}
-			for _, sub := range []string{"skills", "agents", "commands"} {
-				dirs = append(dirs, filepath.Join(inst.InstallPath, sub))
-			}
+			dirs = append(dirs, pluginSubdirs(inst.InstallPath)...)
 		}
 	}
 	return dirs
