@@ -32,8 +32,13 @@ declare -a CATEGORIES=()
 declare -a PROMPTS=()
 declare -a EXPECTED_MATCH=()
 declare -a SHOULD_NOT_MATCH=()
+declare -a EXPECTED_RANK=()
+declare -a DENYLIST=()
 
-while IFS=$'\t' read -r category prompt expected snm; do
+while IFS= read -r _line; do
+  # Replace tabs with \x01 (non-whitespace) so bash read preserves empty fields
+  _line="${_line//$'\t'/$'\x01'}"
+  IFS=$'\x01' read -r category prompt expected snm expected_rank denylist <<< "$_line"
   [[ "$category" == "category" ]] && continue  # skip header
   [[ "$category" == \#* ]] && continue          # skip comments
   [[ -z "$category" ]] && continue              # skip blank lines
@@ -41,6 +46,8 @@ while IFS=$'\t' read -r category prompt expected snm; do
   PROMPTS+=("$prompt")
   EXPECTED_MATCH+=("$expected")
   SHOULD_NOT_MATCH+=("${snm:-0}")
+  EXPECTED_RANK+=("${expected_rank:-}")
+  DENYLIST+=("${denylist:-}")
 done < "$PROMPTS_FILE"
 
 total="${#PROMPTS[@]}"
@@ -56,9 +63,13 @@ declare -a R_TOP_SCORE=()
 declare -a R_NUM_RESULTS=()
 declare -a R_LATENCY=()
 declare -a R_STATUS=()
+declare -a R_ALL_ENTRIES=()
+declare -a R_ALL_SCORES=()
+declare -a R_ACTUAL_RANK=()
+declare -a R_EXPECTED_RANK=()
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-  "prompt" "tokens" "top_entry" "top_score" "num_results" "latency_ms" "expected_match" "verdict" \
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  "prompt" "category" "tokens" "top_entry" "top_score" "num_results" "latency_ms" "expected_match" "expected_rank" "actual_rank" "verdict" \
   > "$TSV_OUT"
 
 for i in "${!PROMPTS[@]}"; do
@@ -76,6 +87,8 @@ for i in "${!PROMPTS[@]}"; do
   top_score="0"
   num_results=0
   run_status="error"
+  all_entries=()
+  all_scores=()
 
   if [[ "$stderr_line" =~ \(([0-9]+)ms\)$ ]]; then
     latency_ms="${BASH_REMATCH[1]}"
@@ -92,26 +105,62 @@ for i in "${!PROMPTS[@]}"; do
     results_part="${results_part% \(*ms\)}"
     IFS=',' read -ra result_items <<< "$results_part"
     num_results="${#result_items[@]}"
-    first_item="${result_items[0]# }"
-    [[ "$first_item" =~ ^(.+)\(([0-9]+)\)$ ]] && {
-      top_entry="${BASH_REMATCH[1]}"
-      top_score="${BASH_REMATCH[2]}"
-    }
+    for item in "${result_items[@]}"; do
+      item="${item# }"
+      if [[ "$item" =~ ^(.+)\(([0-9]+)\)$ ]]; then
+        all_entries+=("${BASH_REMATCH[1]}")
+        all_scores+=("${BASH_REMATCH[2]}")
+      fi
+    done
+    if [[ "${#all_entries[@]}" -gt 0 ]]; then
+      top_entry="${all_entries[0]}"
+      top_score="${all_scores[0]}"
+    fi
     run_status="matched"
   fi
 
   # Determine verdict
   verdict="ok"
+  actual_rank=0
+
+  # Find rank of expected entry in all_entries
+  if [[ -n "$expected" && "$run_status" == "matched" ]]; then
+    for j in "${!all_entries[@]}"; do
+      if [[ "${all_entries[$j]}" == "$expected" ]]; then
+        actual_rank=$((j + 1))
+        break
+      fi
+    done
+  fi
+
+  target_rank="${EXPECTED_RANK[$i]:-5}"
+  [[ -z "$target_rank" ]] && target_rank=5
+
   if [[ "$snm" == "1" && "$run_status" == "matched" ]]; then
     verdict="FALSE_POSITIVE"
   elif [[ -n "$expected" ]]; then
-    if [[ "$stderr_line" == *"$expected"* ]]; then
-      verdict="ok"
-    elif [[ "$run_status" == "zero" || "$run_status" == "skip" ]]; then
+    if [[ "$run_status" == "zero" || "$run_status" == "skip" ]]; then
       verdict="FALSE_NEGATIVE"
-    else
+    elif [[ "$actual_rank" -eq 0 ]]; then
       verdict="EXPECTED_MISSING"
+    elif [[ "$actual_rank" -gt "$target_rank" ]]; then
+      verdict="RANK_TOO_LOW"
     fi
+  fi
+
+  # Denylist check (runs even when verdict=ok)
+  if [[ "$verdict" == "ok" && -n "${DENYLIST[$i]}" && "$run_status" == "matched" ]]; then
+    IFS=',' read -ra deny_items <<< "${DENYLIST[$i]}"
+    for deny in "${deny_items[@]}"; do
+      deny="${deny# }"; deny="${deny% }"
+      [[ -z "$deny" ]] && continue
+      for entry in "${all_entries[@]}"; do
+        if [[ "$entry" == "$deny" ]]; then
+          verdict="DENYLIST_HIT"
+          break 2
+        fi
+      done
+    done
   fi
 
   R_TOKENS[$i]="$tokens"
@@ -120,14 +169,20 @@ for i in "${!PROMPTS[@]}"; do
   R_NUM_RESULTS[$i]="$num_results"
   R_LATENCY[$i]="$latency_ms"
   R_STATUS[$i]="$run_status"
+  _joined_entries="$(IFS='|'; echo "${all_entries[*]:-}")"
+  _joined_scores="$(IFS='|'; echo "${all_scores[*]:-}")"
+  R_ALL_ENTRIES[$i]="$_joined_entries"
+  R_ALL_SCORES[$i]="$_joined_scores"
+  R_ACTUAL_RANK[$i]="$actual_rank"
+  R_EXPECTED_RANK[$i]="$target_rank"
 
   safe_prompt="${prompt//$'\t'/ }"
   safe_prompt="${safe_prompt//$'\n'/ }"
   [[ ${#safe_prompt} -gt 100 ]] && safe_prompt="${safe_prompt:0:97}..."
 
-  printf '%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n' \
-    "$safe_prompt" "$tokens" "$top_entry" "$top_score" \
-    "$num_results" "$latency_ms" "$expected" "$verdict" \
+  printf '%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n' \
+    "$safe_prompt" "${CATEGORIES[$i]}" "$tokens" "$top_entry" "$top_score" \
+    "$num_results" "$latency_ms" "$expected" "$target_rank" "$actual_rank" "$verdict" \
     >> "$TSV_OUT"
 
   if [[ -n "$VERBOSE" ]]; then
@@ -148,6 +203,8 @@ count_error=0
 count_false_pos=0
 count_false_neg=0
 count_expected_missing=0
+count_rank_too_low=0
+count_denylist_hit=0
 latency_sum=0
 
 declare -a latencies=()
@@ -163,11 +220,13 @@ for i in "${!PROMPTS[@]}"; do
   latencies+=("${R_LATENCY[$i]}")
 done
 
-while IFS=$'\t' read -r _ _ _ _ _ _ _ verdict; do
+while IFS=$'\t' read -r _ _ _ _ _ _ _ _ _ _ verdict; do
   case "$verdict" in
     FALSE_POSITIVE)   count_false_pos=$(( count_false_pos + 1 )) ;;
     FALSE_NEGATIVE)   count_false_neg=$(( count_false_neg + 1 )) ;;
     EXPECTED_MISSING) count_expected_missing=$(( count_expected_missing + 1 )) ;;
+    RANK_TOO_LOW)     count_rank_too_low=$(( count_rank_too_low + 1 )) ;;
+    DENYLIST_HIT)     count_denylist_hit=$(( count_denylist_hit + 1 )) ;;
   esac
 done < <(tail -n +2 "$TSV_OUT")
 
@@ -207,12 +266,14 @@ echo "---------------"
 printf "  False positives (should_not_match but matched):     %d\n" "$count_false_pos"
 printf "  False negatives (expected entry not in results):    %d\n" "$count_false_neg"
 printf "  Expected missing  (matched but wrong top entry):    %d\n" "$count_expected_missing"
+printf "  Rank too low    (matched but below target rank):       %d\n" "$count_rank_too_low"
+printf "  Denylist hits   (forbidden entry appeared in results): %d\n" "$count_denylist_hit"
 echo ""
 
 echo "TOP 10 MOST-SURFACED ENTRIES"
 echo "----------------------------"
 tail -n +2 "$TSV_OUT" \
-  | awk -F'\t' '$3 != "" {print $3}' \
+  | awk -F'\t' '$4 != "" {print $4}' \
   | sort | uniq -c | sort -rn | head -10 \
   | while read -r cnt name; do
       printf "  %3d  %s\n" "$cnt" "$name"
@@ -222,7 +283,7 @@ echo ""
 echo "TOP 10 PROMPTS BY SCORE"
 echo "-----------------------"
 tail -n +2 "$TSV_OUT" \
-  | awk -F'\t' '$4+0 > 0 {printf "%05d\t%s\t%s\n", $4+0, $1, $3}' \
+  | awk -F'\t' '$5+0 > 0 {printf "%05d\t%s\t%s\n", $5+0, $1, $4}' \
   | sort -rn | head -10 \
   | while IFS=$'\t' read -r score prompt entry; do
       printf "  score=%-4d  %-45s  -> %s\n" "$((10#$score))" "${prompt:0:45}" "$entry"
@@ -232,7 +293,7 @@ echo ""
 echo "BOTTOM 10 NON-ZERO PROMPTS (weakest matches)"
 echo "----------------------------------------------"
 tail -n +2 "$TSV_OUT" \
-  | awk -F'\t' '$4+0 > 0 {printf "%05d\t%s\t%s\n", $4+0, $1, $3}' \
+  | awk -F'\t' '$5+0 > 0 {printf "%05d\t%s\t%s\n", $5+0, $1, $4}' \
   | sort -n | head -10 \
   | while IFS=$'\t' read -r score prompt entry; do
       printf "  score=%-4d  %-45s  -> %s\n" "$((10#$score))" "${prompt:0:45}" "$entry"
@@ -244,11 +305,7 @@ echo "---------------"
 if [[ "$count_false_neg" -eq 0 ]]; then
   echo "  (none)"
 else
-  tail -n +2 "$TSV_OUT" | while IFS=$'\t' read -r prompt _ _ _ _ _ expected verdict; do
-    if [[ "$verdict" == "FALSE_NEGATIVE" ]]; then
-      printf "  expected=%-40s  prompt: %s\n" "$expected" "${prompt:0:60}"
-    fi
-  done
+  tail -n +2 "$TSV_OUT" | awk -F'\t' '$11 == "FALSE_NEGATIVE" {printf "  expected=%-40s  prompt: %s\n", $8, substr($1, 1, 60)}'
 fi
 echo ""
 
@@ -257,11 +314,25 @@ echo "------------------------------------"
 if [[ "$count_expected_missing" -eq 0 ]]; then
   echo "  (none)"
 else
-  tail -n +2 "$TSV_OUT" | while IFS=$'\t' read -r prompt _ top_entry _ _ _ expected verdict; do
-    if [[ "$verdict" == "EXPECTED_MISSING" ]]; then
-      printf "  expected=%-30s  got=%-30s  prompt: %s\n" "$expected" "$top_entry" "${prompt:0:40}"
-    fi
-  done
+  tail -n +2 "$TSV_OUT" | awk -F'\t' '$11 == "EXPECTED_MISSING" {printf "  expected=%-30s  got=%-30s  prompt: %s\n", $8, $4, substr($1, 1, 40)}'
+fi
+echo ""
+
+echo "RANK TOO LOW (expected entry in results but ranked below target)"
+echo "-----------------------------------------------------------------"
+if [[ "$count_rank_too_low" -eq 0 ]]; then
+  echo "  (none)"
+else
+  tail -n +2 "$TSV_OUT" | awk -F'\t' '$11 == "RANK_TOO_LOW" {printf "  expected=%s got_rank=%s target=%s  prompt: %s\n", $8, $10, $9, substr($1, 1, 60)}'
+fi
+echo ""
+
+echo "DENYLIST HITS (forbidden entry appeared)"
+echo "----------------------------------------"
+if [[ "$count_denylist_hit" -eq 0 ]]; then
+  echo "  (none)"
+else
+  tail -n +2 "$TSV_OUT" | awk -F'\t' '$11 == "DENYLIST_HIT" {printf "  top=%s  prompt: %s\n", $4, substr($1, 1, 60)}'
 fi
 echo ""
 
@@ -270,11 +341,7 @@ echo "---------------"
 if [[ "$count_false_pos" -eq 0 ]]; then
   echo "  (none)"
 else
-  tail -n +2 "$TSV_OUT" | while IFS=$'\t' read -r prompt _ top_entry _ _ _ _ verdict; do
-    if [[ "$verdict" == "FALSE_POSITIVE" ]]; then
-      printf "  matched=%-30s  prompt: %s\n" "$top_entry" "${prompt:0:60}"
-    fi
-  done
+  tail -n +2 "$TSV_OUT" | awk -F'\t' '$11 == "FALSE_POSITIVE" {printf "  matched=%-30s  prompt: %s\n", $4, substr($1, 1, 60)}'
 fi
 echo ""
 
