@@ -52,51 +52,66 @@ type hookSpecificOutput struct {
 	AdditionalContext string `json:"additionalContext,omitempty"`
 }
 
+// --- Hook modes ---
+
+// hookMode parameterizes the shared runHook pipeline. Each entry point
+// (UserPromptSubmit, PostToolUseFailure) is one hookMode value applied to
+// the same 5-step pipeline: readStdin → decode → extract → tokenize → score.
+type hookMode struct {
+	event        string                      // hookEventName in the response
+	statusPrefix string                      // prefix for stderr logStatus line
+	emptyReason  string                      // status when extracted text is empty
+	rejectSlash  bool                        // true => reject text starting with "/"
+	extract      func([]byte) (string, bool) // decode stdin; ok=false means malformed
+}
+
+var (
+	userPromptSubmitMode = hookMode{
+		event:        "UserPromptSubmit",
+		statusPrefix: "claudette",
+		emptyReason:  "skip: empty prompt",
+		rejectSlash:  true,
+		extract: func(data []byte) (string, bool) {
+			var input hookInput
+			if err := json.Unmarshal(data, &input); err != nil {
+				return "", false
+			}
+			return strings.TrimSpace(input.Prompt), true
+		},
+	}
+
+	postToolFailureMode = hookMode{
+		event:        "PostToolUseFailure",
+		statusPrefix: "claudette post-tool-use-failure",
+		emptyReason:  "skip: empty tool response",
+		rejectSlash:  false,
+		extract: func(data []byte) (string, bool) {
+			var input postToolUseFailureInput
+			if err := json.Unmarshal(data, &input); err != nil {
+				return "", false
+			}
+			return anyToString(input.ToolResponse), true
+		},
+	}
+)
+
 // --- Public entry points ---
 
 // Run handles the UserPromptSubmit hook: reads prompt from stdin,
 // scores against the index, writes matching context to stdout.
-func Run() error {
-	var status string
-	defer logStatus("claudette", &status, time.Now())()
-
-	data, err := readStdin()
-	if err != nil {
-		status = "stdin error"
-		return err
-	}
-
-	var input hookInput
-	if err := json.Unmarshal(data, &input); err != nil {
-		status = "skip: malformed input"
-		return nil
-	}
-
-	prompt := strings.TrimSpace(input.Prompt)
-	if prompt == "" {
-		status = "skip: empty prompt"
-		return nil
-	}
-	if strings.HasPrefix(prompt, "/") {
-		status = "skip: slash command"
-		return nil
-	}
-
-	tokens := search.Tokenize(prompt, search.DefaultStopWords())
-	if len(tokens) == 0 {
-		status = "skip: no searchable tokens"
-		return nil
-	}
-
-	return scoreAndRespond(tokens, "UserPromptSubmit", &status)
-}
+func Run() error { return runHook(userPromptSubmitMode) }
 
 // RunPostToolUseFailure handles the PostToolUseFailure hook: fires only when
 // a tool invocation fails, so the failure signal is guaranteed — we tokenize
 // the tool response directly and surface matching KB entries.
-func RunPostToolUseFailure() error {
+func RunPostToolUseFailure() error { return runHook(postToolFailureMode) }
+
+// runHook executes the shared hook pipeline for a given mode: read stdin,
+// decode via mode.extract, empty/slash checks, tokenize, score-and-respond.
+// Returns nil on all skip paths; returns err only on stdin read failure.
+func runHook(m hookMode) error {
 	var status string
-	defer logStatus("claudette post-tool-use-failure", &status, time.Now())()
+	defer logStatus(m.statusPrefix, &status, time.Now())()
 
 	data, err := readStdin()
 	if err != nil {
@@ -104,25 +119,27 @@ func RunPostToolUseFailure() error {
 		return err
 	}
 
-	var input postToolUseFailureInput
-	if err := json.Unmarshal(data, &input); err != nil {
+	text, ok := m.extract(data)
+	if !ok {
 		status = "skip: malformed input"
 		return nil
 	}
-
-	resultText := anyToString(input.ToolResponse)
-	if resultText == "" {
-		status = "skip: empty tool response"
+	if text == "" {
+		status = m.emptyReason
+		return nil
+	}
+	if m.rejectSlash && strings.HasPrefix(text, "/") {
+		status = "skip: slash command"
 		return nil
 	}
 
-	tokens := search.Tokenize(resultText, search.DefaultStopWords())
+	tokens := search.Tokenize(text, search.DefaultStopWords())
 	if len(tokens) == 0 {
 		status = "skip: no searchable tokens"
 		return nil
 	}
 
-	return scoreAndRespond(tokens, "PostToolUseFailure", &status)
+	return scoreAndRespond(tokens, m.event, &status)
 }
 
 // --- Shared pipeline ---
