@@ -66,6 +66,15 @@ func parseEntry(path, sourceDir string) (Entry, bool) {
 	}, true
 }
 
+// dirTypeMap maps exact directory basenames to their entry type.
+// Immutable at package level — safe per Go rules.
+var dirTypeMap = map[string]EntryType{
+	"kb":       TypeKB,
+	"skills":   TypeSkill,
+	"agents":   TypeAgent,
+	"commands": TypeCommand,
+}
+
 func classifyType(path, sourceDir string) EntryType {
 	rel, _ := filepath.Rel(sourceDir, path)
 	parts := strings.Split(rel, string(filepath.Separator))
@@ -74,14 +83,10 @@ func classifyType(path, sourceDir string) EntryType {
 		candidates = append(candidates, parts[0])
 	}
 	for _, name := range candidates {
-		switch {
-		case name == "kb":
-			return TypeKB
-		case name == "skills":
-			return TypeSkill
-		case name == "agents":
-			return TypeAgent
-		case name == "commands" || strings.HasSuffix(name, "-commands"):
+		if t, ok := dirTypeMap[name]; ok {
+			return t
+		}
+		if strings.HasSuffix(name, "-commands") {
 			return TypeCommand
 		}
 	}
