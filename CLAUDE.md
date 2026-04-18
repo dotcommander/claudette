@@ -23,9 +23,14 @@ Claudette indexes Claude Code components (`~/.claude/kb/`, skills, agents, comma
 
 ### Packages
 
-- `internal/index/` — Entry types, frontmatter parsing, filesystem scanning, index cache (load/save/staleness)
+- `internal/index/` — Entry types, frontmatter parsing, filesystem scanning, dir-based type classification; index cache (load/save/staleness/IDF)
+- `internal/config/` — Persistent config (source dirs + context header) at `~/.config/claudette/config.json`
+- `internal/settings/` — Hook-entry read/write against `~/.claude/settings.json`
+- `internal/usage/` — Append-only usage tracking log
+- `internal/fileutil/` — Atomic write helpers (temp-file + rename) shared by config/settings/usage
 - `internal/search/` — Tokenizer (stop words, hyphen-preserving split), category alias map, keyword-overlap scorer
-- `internal/hook/` — UserPromptSubmit + PostToolUseFailure hook modes (stdin JSON -> stdout context)
+- `internal/actions/` — Business logic (search, scan, install); `FilterTypes` lives on `SearchOpts`
+- `internal/hook/` — UserPromptSubmit + PostToolUseFailure hook modes (stdin JSON → stdout context)
 - `internal/output/` — Text and JSON formatters
 
 ### Index & Staleness
