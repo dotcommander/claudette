@@ -109,17 +109,18 @@ func scoreEntry(entry index.Entry, tokens []string, promptBigrams []string, idf 
 	}
 
 	// Bigram matching: flat +3 per matched bigram.
-	// Build a set from entry bigrams for O(1) lookup.
+	// Linear scan over entry.Bigrams — counts are typically <10 per entry and
+	// prompt bigrams are typically <5, so a map allocation would cost more than
+	// the O(n×m) comparisons saved.
 	if len(entry.Bigrams) > 0 && len(promptBigrams) > 0 {
-		entryBigramSet := make(map[string]struct{}, len(entry.Bigrams))
-		for _, bg := range entry.Bigrams {
-			entryBigramSet[bg] = struct{}{}
-		}
-		for _, bg := range promptBigrams {
-			if _, ok := entryBigramSet[bg]; ok {
-				score += 3.0
-				terms = append(terms, matchTerm{term: bg, delta: 3.0})
-				bigramHit = true
+		for _, pb := range promptBigrams {
+			for _, eb := range entry.Bigrams {
+				if pb == eb {
+					score += 3.0
+					terms = append(terms, matchTerm{term: pb, delta: 3.0})
+					bigramHit = true
+					break // each prompt bigram counts once
+				}
 			}
 		}
 	}
