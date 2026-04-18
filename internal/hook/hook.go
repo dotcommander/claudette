@@ -11,8 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotcommander/claudette/internal/config"
 	"github.com/dotcommander/claudette/internal/index"
 	"github.com/dotcommander/claudette/internal/search"
+	"github.com/dotcommander/claudette/internal/usage"
 )
 
 // maxStdinBytes caps stdin reads to prevent unbounded memory use.
@@ -137,7 +139,7 @@ func scoreAndRespond(tokens []string, event string, status *string) error {
 
 	logUsage(results)
 
-	cfg, _ := index.LoadConfig() // zero-value Config falls back to defaults
+	cfg, _ := config.LoadConfig() // zero-value Config falls back to defaults
 	resp := hookResponse{
 		HookSpecificOutput: &hookSpecificOutput{
 			HookEventName:     event,
@@ -232,15 +234,15 @@ func outputMode() string {
 
 func logUsage(results []search.ScoredEntry) {
 	now := time.Now()
-	records := make([]index.UsageRecord, len(results))
+	records := make([]usage.UsageRecord, len(results))
 	for i, r := range results {
-		records[i] = index.UsageRecord{
+		records[i] = usage.UsageRecord{
 			Timestamp: now,
 			Name:      r.Entry.Name,
 			Score:     r.Score,
 		}
 	}
-	_ = index.AppendUsageLog(records)
+	_ = usage.AppendUsageLog(records)
 }
 
 func logStatus(prefix string, status *string, start time.Time) func() {

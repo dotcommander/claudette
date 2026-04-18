@@ -1,4 +1,4 @@
-package index
+package config
 
 import (
 	"encoding/json"
@@ -38,9 +38,9 @@ func (c Config) ContextHeaderOrDefault() string {
 	return c.ContextHeader
 }
 
-// configFilePath returns ~/.config/claudette/<name>.
+// ConfigFilePath returns ~/.config/claudette/<name>.
 // Hardcodes ~/.config/ for consistent cross-platform paths.
-func configFilePath(name string) (string, error) {
+func ConfigFilePath(name string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -50,7 +50,7 @@ func configFilePath(name string) (string, error) {
 
 // ConfigPath returns the path to claudette's config file.
 func ConfigPath() (string, error) {
-	return configFilePath("config.json")
+	return ConfigFilePath("config.json")
 }
 
 // DefaultSourceDirs returns the built-in source directories under ~/.claude/.

@@ -1,4 +1,4 @@
-package index
+package settings
 
 import (
 	"encoding/json"
@@ -65,21 +65,21 @@ func ReadClaudeSettings() (map[string]any, error) {
 		return nil, err
 	}
 
-	var settings map[string]any
-	if err := json.Unmarshal(data, &settings); err != nil {
+	var s map[string]any
+	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
-	return settings, nil
+	return s, nil
 }
 
 // WriteClaudeSettings writes settings back to Claude Code's settings.json
 // via atomic temp-file-then-rename.
-func WriteClaudeSettings(settings map[string]any) error {
+func WriteClaudeSettings(s map[string]any) error {
 	path, err := ClaudeSettingsPath()
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(settings, "", "  ")
+	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -93,15 +93,15 @@ func WriteClaudeSettings(settings map[string]any) error {
 // the identifier but the command differs, the command is updated in place.
 // Returns true if a hook was added or updated.
 // Returns an error if the event name is not a valid Claude Code hook event.
-func UpsertHookEntry(settings map[string]any, event, command string, identifier string) (bool, error) {
+func UpsertHookEntry(s map[string]any, event, command string, identifier string) (bool, error) {
 	if _, ok := validHookEvents[event]; !ok {
 		return false, fmt.Errorf("invalid hook event %q: see https://code.claude.com/docs/en/hooks for valid events", event)
 	}
 
-	hooksMap, ok := settings["hooks"].(map[string]any)
+	hooksMap, ok := s["hooks"].(map[string]any)
 	if !ok {
 		hooksMap = make(map[string]any)
-		settings["hooks"] = hooksMap
+		s["hooks"] = hooksMap
 	}
 
 	groups, _ := hooksMap[event].([]any)
@@ -151,8 +151,8 @@ func UpsertHookEntry(settings map[string]any, event, command string, identifier 
 // RemoveHookEntries removes every hook entry across all events whose command
 // contains identifier. Prunes empty hook groups and empty event arrays so the
 // file doesn't accumulate dangling keys. Returns the number of entries removed.
-func RemoveHookEntries(settings map[string]any, identifier string) int {
-	hooksMap, ok := settings["hooks"].(map[string]any)
+func RemoveHookEntries(s map[string]any, identifier string) int {
+	hooksMap, ok := s["hooks"].(map[string]any)
 	if !ok {
 		return 0
 	}
@@ -171,8 +171,8 @@ func RemoveHookEntries(settings map[string]any, identifier string) int {
 // RemoveHookEntriesForEvent removes entries from a single event whose command
 // contains identifier. Used to migrate claudette off previously-wired event
 // names (e.g. PostToolUse -> PostToolUseFailure). Returns the count removed.
-func RemoveHookEntriesForEvent(settings map[string]any, event, identifier string) int {
-	hooksMap, ok := settings["hooks"].(map[string]any)
+func RemoveHookEntriesForEvent(s map[string]any, event, identifier string) int {
+	hooksMap, ok := s["hooks"].(map[string]any)
 	if !ok {
 		return 0
 	}
@@ -238,8 +238,8 @@ var deprecatedHookEvents = []string{"PostToolResult"}
 // that Claude Code never recognised (e.g., "PostToolResult"). Distinct from
 // RemoveHookEntriesForEvent, which migrates entries off a valid-but-retired
 // event like "PostToolUse". Only touches known-bad keys.
-func RemoveInvalidHookEvents(settings map[string]any) {
-	hooksMap, ok := settings["hooks"].(map[string]any)
+func RemoveInvalidHookEvents(s map[string]any) {
+	hooksMap, ok := s["hooks"].(map[string]any)
 	if !ok {
 		return
 	}

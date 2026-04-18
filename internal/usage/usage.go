@@ -1,4 +1,4 @@
-package index
+package usage
 
 import (
 	"bufio"
@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dotcommander/claudette/internal/config"
 )
 
 // UsageRecord is a single parsed line from the usage log.
@@ -20,7 +22,7 @@ type UsageRecord struct {
 
 // UsageLogPath returns ~/.config/claudette/usage.log.
 func UsageLogPath() (string, error) {
-	return configFilePath("usage.log")
+	return config.ConfigFilePath("usage.log")
 }
 
 // AppendUsageLog opens the log in append mode and writes one TSV line per record.

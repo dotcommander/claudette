@@ -7,6 +7,9 @@ import (
 	"math"
 	"os"
 	"time"
+
+	"github.com/dotcommander/claudette/internal/config"
+	"github.com/dotcommander/claudette/internal/usage"
 )
 
 // CurrentVersion is the index schema version; bump when Entry shape changes.
@@ -26,7 +29,7 @@ type Index struct {
 
 // IndexPath returns ~/.config/claudette/index.json.
 func IndexPath() (string, error) {
-	return configFilePath("index.json")
+	return config.ConfigFilePath("index.json")
 }
 
 // Load reads the index from disk. Returns os.ErrNotExist if missing.
@@ -191,9 +194,9 @@ func LoadOrRebuild(sourceDirs []string) (Index, error) {
 	}
 
 	// Compact usage log into entry hit counts.
-	records, logErr := ParseUsageLog()
+	records, logErr := usage.ParseUsageLog()
 	if logErr == nil && len(records) > 0 {
-		counts := AggregateHitCounts(records)
+		counts := usage.AggregateHitCounts(records)
 		for i := range idx.Entries {
 			if c, ok := counts[idx.Entries[i].Name]; ok {
 				idx.Entries[i].HitCount = c
@@ -203,7 +206,7 @@ func LoadOrRebuild(sourceDirs []string) (Index, error) {
 
 	// Best-effort save; failing to persist doesn't block usage.
 	if saveErr := Save(idx); saveErr == nil && logErr == nil && len(records) > 0 {
-		_ = TruncateUsageLog()
+		_ = usage.TruncateUsageLog()
 	}
 	return idx, nil
 }

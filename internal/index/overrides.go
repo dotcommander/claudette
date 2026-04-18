@@ -6,12 +6,13 @@ import (
 	"os"
 	"time"
 
+	"github.com/dotcommander/claudette/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
 // aliasOverridesPath returns ~/.config/claudette/aliases.yaml.
 func aliasOverridesPath() (string, error) {
-	return configFilePath("aliases.yaml")
+	return config.ConfigFilePath("aliases.yaml")
 }
 
 // aliasOverridesFile is the on-disk YAML structure.

@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dotcommander/claudette/internal/index"
+	"github.com/dotcommander/claudette/internal/config"
+	"github.com/dotcommander/claudette/internal/settings"
 )
 
 // hookIdentifier marks every hook entry claudette owns in Claude Code's
@@ -24,7 +25,7 @@ func Install(w io.Writer) error {
 		return err
 	}
 
-	settingsPath, err := index.ClaudeSettingsPath()
+	settingsPath, err := settings.ClaudeSettingsPath()
 	if err != nil {
 		return fmt.Errorf("resolving settings path: %w", err)
 	}
@@ -61,7 +62,7 @@ func Uninstall(w io.Writer) error {
 		return err
 	}
 
-	settingsPath, err := index.ClaudeSettingsPath()
+	settingsPath, err := settings.ClaudeSettingsPath()
 	if err != nil {
 		return fmt.Errorf("resolving settings path: %w", err)
 	}
@@ -69,13 +70,13 @@ func Uninstall(w io.Writer) error {
 	fmt.Fprintln(w, "Uninstalling claudette...")
 	fmt.Fprintf(w, "  settings: %s\n", settingsPath)
 
-	settings, err := index.ReadClaudeSettings()
+	s, err := settings.ReadClaudeSettings()
 	if err != nil {
 		return fmt.Errorf("reading settings: %w", err)
 	}
-	removed := index.RemoveHookEntries(settings, hookIdentifier)
+	removed := settings.RemoveHookEntries(s, hookIdentifier)
 	if removed > 0 {
-		if err := index.WriteClaudeSettings(settings); err != nil {
+		if err := settings.WriteClaudeSettings(s); err != nil {
 			return fmt.Errorf("writing settings: %w", err)
 		}
 		fmt.Fprintf(w, "  hooks:    removed %d entry/entries\n", removed)
@@ -83,7 +84,7 @@ func Uninstall(w io.Writer) error {
 		fmt.Fprintln(w, "  hooks:    no claudette entries found")
 	}
 
-	configPath, err := index.ConfigPath()
+	configPath, err := config.ConfigPath()
 	if err != nil {
 		return fmt.Errorf("resolving config path: %w", err)
 	}
@@ -112,27 +113,27 @@ func resolvedExecutable() (string, error) {
 }
 
 func wireHooks(w io.Writer, binPath string) error {
-	settings, err := index.ReadClaudeSettings()
+	s, err := settings.ReadClaudeSettings()
 	if err != nil {
 		return fmt.Errorf("reading settings: %w", err)
 	}
 
-	index.RemoveInvalidHookEvents(settings)
+	settings.RemoveInvalidHookEvents(s)
 
 	// Migrate pre-v0.6.0 installs: PostToolUse fired on every tool call and
 	// used regex to sniff for failure text, which produced false positives and
 	// wasted cycles on every success. PostToolUseFailure fires only on actual
 	// failures — strictly better signal.
-	migrated := index.RemoveHookEntriesForEvent(settings, "PostToolUse", hookIdentifier)
+	migrated := settings.RemoveHookEntriesForEvent(s, "PostToolUse", hookIdentifier)
 
 	hookCmd := binPath + " hook"
 	failCmd := binPath + " post-tool-use-failure"
 
-	wired1, err := index.UpsertHookEntry(settings, "UserPromptSubmit", hookCmd, hookIdentifier)
+	wired1, err := settings.UpsertHookEntry(s, "UserPromptSubmit", hookCmd, hookIdentifier)
 	if err != nil {
 		return fmt.Errorf("wiring UserPromptSubmit hook: %w", err)
 	}
-	wired2, err := index.UpsertHookEntry(settings, "PostToolUseFailure", failCmd, hookIdentifier)
+	wired2, err := settings.UpsertHookEntry(s, "PostToolUseFailure", failCmd, hookIdentifier)
 	if err != nil {
 		return fmt.Errorf("wiring PostToolUseFailure hook: %w", err)
 	}
@@ -142,7 +143,7 @@ func wireHooks(w io.Writer, binPath string) error {
 		return nil
 	}
 
-	if err := index.WriteClaudeSettings(settings); err != nil {
+	if err := settings.WriteClaudeSettings(s); err != nil {
 		return fmt.Errorf("writing settings: %w", err)
 	}
 	if migrated > 0 {
@@ -158,18 +159,18 @@ func wireHooks(w io.Writer, binPath string) error {
 }
 
 func ensureConfig(w io.Writer) error {
-	cfg, err := index.LoadConfig()
+	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
-	configPath, err := index.ConfigPath()
+	configPath, err := config.ConfigPath()
 	if err != nil {
 		return fmt.Errorf("resolving config path: %w", err)
 	}
 
 	changed := false
 	if len(cfg.SourceDirs) == 0 {
-		defaults, err := index.DefaultSourceDirs()
+		defaults, err := config.DefaultSourceDirs()
 		if err != nil {
 			return fmt.Errorf("resolving default dirs: %w", err)
 		}
@@ -177,7 +178,7 @@ func ensureConfig(w io.Writer) error {
 		changed = true
 	}
 	if strings.TrimSpace(cfg.ContextHeader) == "" {
-		cfg.ContextHeader = index.DefaultContextHeader()
+		cfg.ContextHeader = config.DefaultContextHeader()
 		changed = true
 	}
 
@@ -185,7 +186,7 @@ func ensureConfig(w io.Writer) error {
 		fmt.Fprintf(w, "  config:   %s (existing)\n", configPath)
 		return nil
 	}
-	if err := index.SaveConfig(cfg); err != nil {
+	if err := config.SaveConfig(cfg); err != nil {
 		return fmt.Errorf("saving config: %w", err)
 	}
 	fmt.Fprintf(w, "  config:   wrote %s\n", configPath)

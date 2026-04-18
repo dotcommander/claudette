@@ -8,20 +8,22 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/dotcommander/claudette/internal/config"
 )
 
 // SourceDirs returns the directories to scan, combining user-configured
 // source_dirs (from config.json) with defaults and plugin directories.
 func SourceDirs() ([]string, error) {
 	// User-configured dirs take priority.
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
 	candidates := append([]string(nil), cfg.SourceDirs...)
 
 	// Always include defaults (existing dirs only).
-	defaults, err := DefaultSourceDirs()
+	defaults, err := config.DefaultSourceDirs()
 	if err != nil {
 		return nil, err
 	}
