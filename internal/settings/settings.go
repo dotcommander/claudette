@@ -56,7 +56,22 @@ func ReadClaudeSettings() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readSettingsAt(path)
+}
 
+// WriteClaudeSettings writes settings back to Claude Code's settings.json
+// via atomic temp-file-then-rename.
+func WriteClaudeSettings(s map[string]any) error {
+	path, err := ClaudeSettingsPath()
+	if err != nil {
+		return err
+	}
+	return writeSettingsAt(path, s)
+}
+
+// readSettingsAt reads and parses a settings JSON file at an explicit path.
+// Returns an empty map if the file does not exist.
+func readSettingsAt(path string) (map[string]any, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -72,13 +87,9 @@ func ReadClaudeSettings() (map[string]any, error) {
 	return s, nil
 }
 
-// WriteClaudeSettings writes settings back to Claude Code's settings.json
-// via atomic temp-file-then-rename.
-func WriteClaudeSettings(s map[string]any) error {
-	path, err := ClaudeSettingsPath()
-	if err != nil {
-		return err
-	}
+// writeSettingsAt writes a settings map to an explicit path via
+// atomic temp-file-then-rename.
+func writeSettingsAt(path string, s map[string]any) error {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
