@@ -12,10 +12,11 @@ import (
 
 // SearchOpts controls search behavior from CLI flags.
 type SearchOpts struct {
-	Format    string
-	JSON      bool // --json shorthand: when true, overrides Format to "json"
-	Threshold int
-	Limit     int
+	Format      string
+	JSON        bool // --json shorthand: when true, overrides Format to "json"
+	Threshold   int
+	Limit       int
+	FilterTypes map[string]index.EntryType // CLI filter name -> entry type
 }
 
 // NewSearchOpts returns SearchOpts populated with package defaults.
@@ -25,6 +26,12 @@ func NewSearchOpts() SearchOpts {
 		Format:    "text",
 		Threshold: search.DefaultThreshold,
 		Limit:     search.DefaultLimit,
+		FilterTypes: map[string]index.EntryType{
+			"kb":      index.TypeKB,
+			"skill":   index.TypeSkill,
+			"agent":   index.TypeAgent,
+			"command": index.TypeCommand,
+		},
 	}
 }
 
@@ -38,7 +45,7 @@ func Search(w io.Writer, prompt, filter string, opts SearchOpts) error {
 
 	entries := idx.Entries
 	if filter != "" {
-		t, ok := FilterTypes[filter]
+		t, ok := opts.FilterTypes[filter]
 		if !ok {
 			return fmt.Errorf("unknown filter type: %q", filter)
 		}
@@ -59,14 +66,6 @@ func Search(w io.Writer, prompt, filter string, opts SearchOpts) error {
 		output.WriteText(w, results)
 		return nil
 	}
-}
-
-// FilterTypes maps CLI filter names to index entry types.
-var FilterTypes = map[string]index.EntryType{
-	"kb":      index.TypeKB,
-	"skill":   index.TypeSkill,
-	"agent":   index.TypeAgent,
-	"command": index.TypeCommand,
 }
 
 // LoadIndex discovers source dirs and loads (or rebuilds) the cached index.
