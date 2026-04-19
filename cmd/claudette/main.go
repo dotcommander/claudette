@@ -73,6 +73,9 @@ func rootCmd() *cobra.Command {
 		installCmd(),
 		uninstallCmd(),
 		versionCmd(),
+		projectsCmd(),
+		sessionsCmd(),
+		turnsCmd(),
 	)
 
 	return root
@@ -161,6 +164,64 @@ func versionCmd() *cobra.Command {
 			fmt.Println(resolveVersion())
 		},
 	}
+}
+
+func projectsCmd() *cobra.Command {
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "projects",
+		Short: "List all known Claude Code projects, ordered by most-recent activity",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return actions.RunProjects(cmd.Context(), os.Stdout, actions.ProjectsOpts{
+				JSON: jsonOut,
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
+	return cmd
+}
+
+func sessionsCmd() *cobra.Command {
+	var all bool
+	var limit int
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "sessions",
+		Short: "List sessions for the current project (use --all for all projects)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return actions.RunSessions(cmd.Context(), os.Stdout, actions.SessionsOpts{
+				All:   all,
+				Limit: limit,
+				JSON:  jsonOut,
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "List sessions across all projects")
+	cmd.Flags().IntVar(&limit, "limit", 10, "Maximum number of sessions to show")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
+	return cmd
+}
+
+func turnsCmd() *cobra.Command {
+	var limit int
+	var full bool
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "turns <transcript-path>",
+		Short: "Parse a session transcript JSONL and show extracted turns",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return actions.RunTurns(cmd.Context(), os.Stdout, args[0], actions.TurnsOpts{
+				Limit: limit,
+				Full:  full,
+				JSON:  jsonOut,
+			})
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 5, "Maximum number of turns to show")
+	cmd.Flags().BoolVar(&full, "full", false, "Do not truncate text fields")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
+	return cmd
 }
 
 // resolveVersion prefers (in order): ldflags-injected version, module version

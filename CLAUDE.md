@@ -62,6 +62,16 @@ Results filtered by threshold (default 2), capped by limit (default 5), sorted b
 
 All errors exit silently (no stdout/stderr) — hook must never block the user's conversation. Prompts starting with `/` are skipped (slash commands, not searches). Hook hardcodes threshold=2, limit=5.
 
+## No Remote Calls (BLOCKING)
+
+Claudette runs on every prompt in the hook hot path. Any remote call — LLM API, embedding service, HTTP fetch — adds unacceptable latency and a network dependency to a synchronous hook.
+
+- **Zero network I/O in the hook path.** No `http.Client`, no API calls, no DNS lookups. The hook must work fully offline in <50ms.
+- **No LLM calls anywhere in claudette.** No embedding generation, no semantic similarity via API, no "enrich with AI" features that call external models. All intelligence is local: keyword overlap, aliases, plural normalization, IDF weighting.
+- **No remote data fetching.** No fetching skill/agent/command definitions from registries, GitHub, or plugin APIs. All data comes from local filesystem paths discovered at runtime.
+- **Offline enrichment only.** If future features need AI-generated summaries or semantic clustering, they run as a separate background CLI command (e.g., `claudette enrich`), not in the hook. The hook always reads pre-computed local data.
+- Adding an LLM or HTTP dependency to `go.mod` requires an explicit exception with a latency budget justification.
+
 ## Conventions
 
 - Minimal config. `claudette install` writes `~/.config/claudette/config.json` for source dirs; everything else is convention. (`init` is kept as a back-compat alias.)

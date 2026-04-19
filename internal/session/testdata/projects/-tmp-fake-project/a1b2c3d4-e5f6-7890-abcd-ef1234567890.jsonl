@@ -1,0 +1,2 @@
+{"type":"user","uuid":"p1","timestamp":"2026-04-19T08:00:00Z","sessionId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","message":{"role":"user","content":"test session in projects fixture"}}
+{"type":"assistant","uuid":"p2","timestamp":"2026-04-19T08:00:01Z","sessionId":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","message":{"id":"msg_01","role":"assistant","content":[{"type":"text","text":"responding to test"}]}}

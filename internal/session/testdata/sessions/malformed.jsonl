@@ -1,0 +1,5 @@
+{"type":"user","uuid":"u1","timestamp":"2026-04-19T10:00:00Z","sessionId":"sess3","message":{"role":"user","content":"First valid line"}}
+NOT JSON AT ALL
+{"type":"assistant","uuid":"a1","timestamp":"2026-04-19T10:00:01Z","sessionId":"sess3","message":{"id":"msg_01","role":"assistant","content":[{"type":"text","text":"Response to first"}]}}
+{broken json here
+{"type":"user","uuid":"u2","timestamp":"2026-04-19T10:00:02Z","sessionId":"sess3","message":{"role":"user","content":"Second valid line"}}

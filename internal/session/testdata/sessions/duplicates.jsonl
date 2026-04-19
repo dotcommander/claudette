@@ -1,0 +1,3 @@
+{"type":"user","uuid":"d1","timestamp":"2026-04-19T15:00:00Z","sessionId":"sess8","message":{"role":"user","content":"This is a duplicate message that will appear twice"}}
+{"type":"user","uuid":"d1b","timestamp":"2026-04-19T15:00:00Z","sessionId":"sess8","message":{"role":"user","content":"This is a duplicate message that will appear twice"}}
+{"type":"assistant","uuid":"d2","timestamp":"2026-04-19T15:00:01Z","sessionId":"sess8","message":{"id":"msg_01","role":"assistant","content":[{"type":"text","text":"assistant reply"}]}}
