@@ -29,3 +29,5 @@ corpus
     bigrams:
       (no matches)
 
+would surface (full mode):
+  kb/go/goroutine-leak-detection.md — Goroutine Leak Detection [matched: goroutine, leak]

@@ -13,6 +13,8 @@ import (
 )
 
 // fixedReport returns a deterministic ExplainReport for golden-file and JSON shape tests.
+// WouldSurface is set to the single above-threshold entry so the golden captures the
+// full hook dry-run output.
 func fixedReport() ExplainReport {
 	return ExplainReport{
 		Prompt:       "goroutine leak",
@@ -65,6 +67,14 @@ func fixedReport() ExplainReport {
 				Suppressed: "below threshold",
 			},
 		},
+		WouldSurface: []WouldSurfaceEntry{
+			{
+				Path:    "kb/go/goroutine-leak-detection.md",
+				Title:   "Goroutine Leak Detection",
+				Matched: []string{"goroutine", "leak"},
+			},
+		},
+		SuppressionReason: "",
 	}
 }
 
@@ -178,5 +188,154 @@ func TestWriteExplainText_EmptyDiagnostics(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q; got:\n%s", want, out)
 		}
+	}
+}
+
+// TestWriteExplainText_WouldSurface_WithHits verifies the "would surface" block
+// renders matching entries in the em-dash / [matched: ...] format.
+func TestWriteExplainText_WouldSurface_WithHits(t *testing.T) {
+	t.Parallel()
+
+	r := ExplainReport{
+		Prompt:      "goroutine leak",
+		RawTokens:   []string{"goroutine", "leak"},
+		KeptTokens:  []string{"goroutine", "leak"},
+		TotalScored: 1,
+		Diagnostics: nil,
+		WouldSurface: []WouldSurfaceEntry{
+			{Path: "~/.claude/kb/go/foo.md", Title: "Foo Entry", Matched: []string{"goroutine", "leak"}},
+		},
+		SuppressionReason: "",
+	}
+
+	var buf bytes.Buffer
+	WriteExplainText(&buf, r)
+	out := buf.String()
+
+	for _, want := range []string{
+		"would surface (full mode):",
+		"~/.claude/kb/go/foo.md",
+		"Foo Entry",
+		"[matched: goroutine, leak]",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
+// TestWriteExplainText_WouldSurface_Suppressed verifies that a non-empty
+// SuppressionReason renders the "(nothing would be injected: <reason>)" line.
+func TestWriteExplainText_WouldSurface_Suppressed(t *testing.T) {
+	t.Parallel()
+
+	r := ExplainReport{
+		Prompt:            "hi",
+		RawTokens:         []string{"hi"},
+		KeptTokens:        []string{"hi"},
+		TotalScored:       0,
+		Diagnostics:       nil,
+		WouldSurface:      nil,
+		SuppressionReason: "low-confidence",
+	}
+
+	var buf bytes.Buffer
+	WriteExplainText(&buf, r)
+	out := buf.String()
+
+	want := "(nothing would be injected: low-confidence)"
+	if !strings.Contains(out, want) {
+		t.Errorf("output missing %q; got:\n%s", want, out)
+	}
+}
+
+// TestWriteExplainText_WouldSurface_NothingAboveThreshold verifies the
+// "(nothing above threshold)" line when both WouldSurface is empty and no
+// suppression reason is set.
+func TestWriteExplainText_WouldSurface_NothingAboveThreshold(t *testing.T) {
+	t.Parallel()
+
+	r := ExplainReport{
+		Prompt:            "blorp",
+		RawTokens:         []string{"blorp"},
+		KeptTokens:        []string{"blorp"},
+		TotalScored:       0,
+		Diagnostics:       nil,
+		WouldSurface:      nil,
+		SuppressionReason: "",
+	}
+
+	var buf bytes.Buffer
+	WriteExplainText(&buf, r)
+	out := buf.String()
+
+	want := "(nothing above threshold)"
+	if !strings.Contains(out, want) {
+		t.Errorf("output missing %q; got:\n%s", want, out)
+	}
+}
+
+// TestExplainReport_MarshalJSON_WouldSurface verifies the JSON wire shape includes
+// "would_surface" (always present) and "suppression_reason" (omitted when empty).
+func TestExplainReport_MarshalJSON_WouldSurface(t *testing.T) {
+	t.Parallel()
+
+	r := fixedReport()
+	r.WouldSurface = []WouldSurfaceEntry{
+		{Path: "~/.claude/kb/go/foo.md", Title: "Foo", Matched: []string{"goroutine"}},
+	}
+	r.SuppressionReason = ""
+
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	ws, ok := parsed["would_surface"]
+	if !ok {
+		t.Fatal("JSON missing would_surface")
+	}
+	wsArr, ok := ws.([]any)
+	if !ok || len(wsArr) != 1 {
+		t.Errorf("would_surface should be array with 1 element, got %T len=%d", ws, len(wsArr))
+	}
+	if _, present := parsed["suppression_reason"]; present {
+		t.Error("suppression_reason should be omitted when empty")
+	}
+}
+
+// TestExplainReport_MarshalJSON_SuppressionReason verifies suppression_reason
+// appears in JSON when non-empty.
+func TestExplainReport_MarshalJSON_SuppressionReason(t *testing.T) {
+	t.Parallel()
+
+	r := fixedReport()
+	r.WouldSurface = nil
+	r.SuppressionReason = "low-confidence"
+
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if got, _ := parsed["suppression_reason"].(string); got != "low-confidence" {
+		t.Errorf("suppression_reason=%q, want %q", got, "low-confidence")
+	}
+	// would_surface should still be an empty array (not omitted).
+	ws, ok := parsed["would_surface"]
+	if !ok {
+		t.Fatal("JSON missing would_surface (should always be present)")
+	}
+	wsArr, _ := ws.([]any)
+	if len(wsArr) != 0 {
+		t.Errorf("would_surface should be empty array, got len=%d", len(wsArr))
 	}
 }
