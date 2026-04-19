@@ -1,0 +1,31 @@
+explain: "goroutine leak"
+
+tokens
+  raw:      [goroutine leak]
+  kept:     [goroutine leak]
+  dropped:  (none)
+
+corpus
+  entries scored:    2
+  entries shown:     2  (of 1 above threshold, 1 suppressed)
+  idf enabled:       false
+  avg field length:  10.0
+
+[1] score=5  goroutine-leak-detection  (kb/go)
+    final=5  raw=5.00  boost=1.00×  preboost=5.00
+    tokens:
+      goroutine  alias+direct  weight=3  idf=1.00  Δ=+5.00
+      leak       direct        weight=2  idf=1.00  Δ=+2.00
+    bigrams:
+      goroutine leak  Δ=+3.00
+
+--- suppressed (not in Score output) ---
+
+[S1] score=2  refactoring-smells  (kb/refactoring)  below threshold
+    final=2  raw=1.80  boost=1.00×  preboost=1.80
+    tokens:
+      goroutine  miss
+      leak       miss
+    bigrams:
+      (no matches)
+

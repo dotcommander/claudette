@@ -62,9 +62,11 @@ func rootCmd() *cobra.Command {
 		newSearchCmd("", os.Stdin),
 		newSearchCmd("kb", os.Stdin),
 		newSearchCmd("skill", os.Stdin),
+		explainCmd(os.Stdin),
 		scanCmd(),
 		installCmd(),
 		uninstallCmd(),
+		updateCmd(),
 		versionCmd(),
 		projectsCmd(),
 		sessionsCmd(),
@@ -99,6 +101,30 @@ func newSearchCmd(filter string, stdin io.Reader) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.JSON, "json", false, "Output as JSON (shorthand for --format json; takes precedence)")
 	cmd.Flags().IntVar(&opts.Threshold, "threshold", opts.Threshold, "Minimum score to include in results")
 	cmd.Flags().IntVar(&opts.Limit, "limit", opts.Limit, "Maximum number of results")
+	return cmd
+}
+
+func explainCmd(stdin io.Reader) *cobra.Command {
+	opts := actions.NewExplainOpts()
+	cmd := &cobra.Command{
+		Use:   "explain [prompt...]",
+		Short: "Show per-token, per-entry score breakdown for a prompt",
+		Long: "Runs the scorer in diagnostic mode against the cached index. " +
+			"Shows tokenization, stop-word filtering, per-token/per-entry score " +
+			"contributions (direct, plural, stem, alias, bigram), and entries that " +
+			"were suppressed by threshold or IDF gates. Intended for diagnosing " +
+			"expected-missing matches in the benchmark corpus.",
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			prompt, err := resolvePrompt(args, stdin)
+			if err != nil {
+				return err
+			}
+			return actions.Explain(os.Stdout, prompt, opts)
+		},
+	}
+	cmd.Flags().BoolVar(&opts.JSON, "json", false, "Output as JSON")
+	cmd.Flags().IntVar(&opts.Limit, "limit", opts.Limit, "Max entries in detailed breakdown (0 = all)")
 	return cmd
 }
 
@@ -153,6 +179,25 @@ func uninstallCmd() *cobra.Command {
 			return actions.Uninstall(os.Stdout)
 		},
 	}
+}
+
+func updateCmd() *cobra.Command {
+	var check bool
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Upgrade claudette to the latest release",
+		Long: "Run 'go install github.com/dotcommander/claudette/cmd/claudette@latest' " +
+			"to replace the current binary with the latest tagged release. " +
+			"Use --check to query the GitHub releases API without installing.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if check {
+				return actions.CheckUpdate(cmd.Context(), os.Stdout, resolveVersion())
+			}
+			return actions.Update(cmd.Context(), os.Stderr)
+		},
+	}
+	cmd.Flags().BoolVar(&check, "check", false, "Print current vs. latest release without installing")
+	return cmd
 }
 
 func versionCmd() *cobra.Command {

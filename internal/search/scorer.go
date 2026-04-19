@@ -42,6 +42,65 @@ func bm25(weight int, idf, dl, avgdl float64) float64 {
 	return tf * (k1 + 1) / (tf + k1*(1-b+b*dl/avgdl)) * idf
 }
 
+// applyUsageBoost multiplies the raw score by a usage-based factor:
+//
+//	boost = 1 + log1p(hitCount) / 10
+//
+// Returns 1.0× when hitCount is 0 or negative. Uses math.Log1p for numerical
+// stability at small hitCount. The curve is O(log n) — 0 hits → 1.00x,
+// 10 → 1.24x, 100 → 1.46x, 1000 → 1.69x. No ceiling: the log function is
+// the ceiling. Applied pre-rounding so sub-unit boosts can still re-rank ties.
+func applyUsageBoost(score float64, hitCount int) float64 {
+	if hitCount <= 0 {
+		return score
+	}
+	return score * (1 + math.Log1p(float64(hitCount))/10)
+}
+
+// tokenScore is the per-token result used by both the fast path and diagnostics.
+type tokenScore struct {
+	Delta    float64
+	Kind     string // "direct"|"plural"|"stem"|"alias"|"miss" — may be combined e.g. "alias+direct"
+	Weight   int    // field weight from entry.Keywords map (0 for alias-only/miss)
+	AliasCat string // canonical category this token aliased to, if any
+}
+
+// EntryDiagnostics captures everything the scorer computed for a single entry.
+// Populated unconditionally; Score discards the details, ScoreExplained keeps them.
+//
+// Suppressed is the human-readable reason this entry would NOT appear in Score's
+// output. Empty string means the entry passed all gates. Values:
+//
+//	"below threshold"     — RawScore (post-boost, pre-round) < threshold
+//	"idf gate: low-idf"   — only matched via common terms, no bigram
+//
+// Never set by the scorer itself — filled in by ScoreExplained based on the
+// same conditions Score uses.
+type EntryDiagnostics struct {
+	Entry       index.Entry `json:"entry"`
+	RawScore    float64     `json:"raw_score"`     // pre-round, post-usage-boost
+	FinalScore  int         `json:"final_score"`   // math.Round(RawScore)
+	TokenHits   []TokenHit  `json:"token_hits"`    // one per prompt token (includes misses)
+	BigramHits  []string    `json:"bigram_hits"`   // prompt bigrams that matched this entry
+	MaxIDF      float64     `json:"max_idf"`       // best per-term IDF contribution (for gate)
+	UsageBoost  float64     `json:"usage_boost"`   // multiplier applied (1.0 if hit_count=0)
+	PreBoostSum float64     `json:"pre_boost_sum"` // score before applyUsageBoost
+	Suppressed  string      `json:"suppressed,omitzero"`
+}
+
+// TokenHit is one prompt token's interaction with one entry.
+// Kind values: "direct" | "plural" | "stem" | "alias" | "alias+direct" |
+// "alias+plural" | "alias+stem" | "miss". Multiple mechanisms may fire for
+// one token (alias + keyword additive); Kind joins them with "+" in that case.
+type TokenHit struct {
+	Token    string  `json:"token"`
+	Kind     string  `json:"kind"`
+	Weight   int     `json:"weight,omitzero"`    // field weight from entry.Keywords (0 for alias-only, miss)
+	IDF      float64 `json:"idf"`                // IDF multiplier used (1.0 if no IDF map)
+	Delta    float64 `json:"delta"`              // this token's contribution to score
+	AliasCat string  `json:"alias_cat,omitzero"` // canonical category alias resolved to, if any
+}
+
 // Score computes relevance scores for all entries against tokenized prompt.
 // Uses field-weighted keywords, IDF multipliers, BM25 saturation, and bigrams.
 // Returns entries with score >= threshold, sorted by score descending.
@@ -83,58 +142,147 @@ func Score(entries []index.Entry, tokens []string, threshold int, idf map[string
 	return results
 }
 
-// scoreEntry computes the score and matched terms for a single entry.
-// Returns: total score, matched terms with deltas, whether any bigram matched, max per-term IDF contribution.
-func scoreEntry(entry index.Entry, tokens []string, promptBigrams []string, idf map[string]float64, avgdl float64) (float64, []matchTerm, bool, float64) {
-	var score float64
-	var terms []matchTerm
+// ScoreExplained returns diagnostics for every entry, including suppressed ones.
+// Unlike Score, it does not filter by threshold or the IDF gate — callers get
+// the complete picture, with Suppressed populated for entries Score would drop.
+// Sort order: kept entries (score desc, name asc) then suppressed entries (score desc, name asc).
+//
+// When tokens is empty, returns nil (same contract as Score).
+func ScoreExplained(entries []index.Entry, tokens []string, threshold int, idf map[string]float64, avgdl float64) []EntryDiagnostics {
+	if len(tokens) == 0 {
+		return nil
+	}
+
+	promptBigrams := buildBigrams(tokens)
+	threshF := float64(threshold)
+
+	diags := make([]EntryDiagnostics, 0, len(entries))
+	for _, entry := range entries {
+		d := scoreEntryCore(entry, tokens, promptBigrams, idf, avgdl)
+
+		bigramHit := len(d.BigramHits) > 0
+		switch {
+		case d.RawScore < threshF:
+			d.Suppressed = "below threshold"
+		case idf != nil && !bigramHit && d.MaxIDF < minIDFForMatch:
+			d.Suppressed = "idf gate: low-idf"
+		}
+		diags = append(diags, d)
+	}
+
+	// Sort: kept entries first (score desc, name asc), then suppressed (score desc, name asc).
+	slices.SortFunc(diags, func(a, b EntryDiagnostics) int {
+		aSupp := a.Suppressed != ""
+		bSupp := b.Suppressed != ""
+		if aSupp != bSupp {
+			if bSupp {
+				return -1 // a kept, b suppressed → a first
+			}
+			return 1
+		}
+		if a.FinalScore != b.FinalScore {
+			return cmp.Compare(b.FinalScore, a.FinalScore) // descending
+		}
+		return cmp.Compare(a.Entry.Name, b.Entry.Name)
+	})
+
+	return diags
+}
+
+// scoreEntryCore is the single scoring implementation. Always fully populates
+// EntryDiagnostics. Callers drop unused fields.
+func scoreEntryCore(entry index.Entry, tokens []string, promptBigrams []string, idf map[string]float64, avgdl float64) EntryDiagnostics {
+	var preBoostSum float64
 	var maxIDF float64
-	var bigramHit bool
+	hits := make([]TokenHit, 0, len(tokens))
 
 	dl := float64(len(entry.Keywords))
+	idfMulFn := func(tok string) float64 { return idfMul(idf, tok) }
+
 	for _, tok := range tokens {
-		delta, hit, aliasHit := scoreToken(entry, tok, idf, dl, avgdl)
-		score += delta
-		if hit {
-			terms = append(terms, matchTerm{term: tok, delta: delta})
+		ts := scoreToken(entry, tok, idf, dl, avgdl)
+		preBoostSum += ts.Delta
+
+		mul := idfMulFn(tok)
+		if ts.Kind != "miss" {
 			// Track max per-term IDF multiplier for the IDF gate.
 			// Alias hits are curated signals — treat them as IDF=minIDFForMatch so
 			// they always pass the gate regardless of the token's corpus frequency.
-			if aliasHit {
+			if strings.Contains(ts.Kind, "alias") {
 				maxIDF = max(maxIDF, minIDFForMatch)
-			} else if v := idfMul(idf, tok); v > maxIDF {
-				maxIDF = v
+			} else {
+				maxIDF = max(maxIDF, mul)
 			}
 		}
+
+		hits = append(hits, TokenHit{
+			Token:    tok,
+			Kind:     ts.Kind,
+			Weight:   ts.Weight,
+			IDF:      mul,
+			Delta:    ts.Delta,
+			AliasCat: ts.AliasCat,
+		})
 	}
 
 	// Bigram matching: flat +3 per matched bigram.
-	// Linear scan over entry.Bigrams — counts are typically <10 per entry and
-	// prompt bigrams are typically <5, so a map allocation would cost more than
-	// the O(n×m) comparisons saved.
+	var bigramHits []string
 	if len(entry.Bigrams) > 0 && len(promptBigrams) > 0 {
 		for _, pb := range promptBigrams {
 			for _, eb := range entry.Bigrams {
 				if pb == eb {
-					score += 3.0
-					terms = append(terms, matchTerm{term: pb, delta: 3.0})
-					bigramHit = true
+					preBoostSum += 3.0
+					bigramHits = append(bigramHits, pb)
 					break // each prompt bigram counts once
 				}
 			}
 		}
 	}
 
-	return score, terms, bigramHit, maxIDF
+	rawScore := applyUsageBoost(preBoostSum, entry.HitCount)
+	var usageBoost float64
+	if preBoostSum == 0 {
+		usageBoost = 1.0
+	} else {
+		usageBoost = rawScore / preBoostSum
+	}
+
+	return EntryDiagnostics{
+		Entry:       entry,
+		RawScore:    rawScore,
+		FinalScore:  int(math.Round(rawScore)),
+		TokenHits:   hits,
+		BigramHits:  bigramHits,
+		MaxIDF:      maxIDF,
+		UsageBoost:  usageBoost,
+		PreBoostSum: preBoostSum,
+	}
 }
 
-// scoreToken returns the score contribution, whether the token matched, and
-// whether the match was driven by a category alias.
+// scoreEntry is the Score-path adapter: same return tuple as before.
+// Kept so Score's call site is untouched; this is a 5-line forwarder, not
+// a parallel implementation.
+func scoreEntry(entry index.Entry, tokens []string, promptBigrams []string, idf map[string]float64, avgdl float64) (float64, []matchTerm, bool, float64) {
+	d := scoreEntryCore(entry, tokens, promptBigrams, idf, avgdl)
+	terms := make([]matchTerm, 0, len(d.TokenHits)+len(d.BigramHits))
+	for _, h := range d.TokenHits {
+		if h.Kind != "miss" {
+			terms = append(terms, matchTerm{term: h.Token, delta: h.Delta})
+		}
+	}
+	for _, bg := range d.BigramHits {
+		terms = append(terms, matchTerm{term: bg, delta: 3.0})
+	}
+	return d.RawScore, terms, len(d.BigramHits) > 0, d.MaxIDF
+}
+
+// scoreToken returns the score contribution and what kind of match fired.
 // dl is the document length (len(entry.Keywords)); avgdl is the corpus average.
-func scoreToken(entry index.Entry, tok string, idf map[string]float64, dl, avgdl float64) (float64, bool, bool) {
+func scoreToken(entry index.Entry, tok string, idf map[string]float64, dl, avgdl float64) tokenScore {
 	mul := idfMul(idf, tok)
 	var delta float64
-	var aliasHit bool
+	var aliasCat string
+	var kindParts []string
 
 	// Category alias boost: flat +2 (additive — does not short-circuit keyword matching).
 	// Fixed multiplier avoids IDF suppressing curated alias signals when the alias
@@ -142,21 +290,34 @@ func scoreToken(entry index.Entry, tok string, idf map[string]float64, dl, avgdl
 	// deliberate user intent signal that must not be frequency-dampened).
 	if canonical, ok := CategoryAlias(tok); ok && canonical == entry.Category {
 		delta += 2.0
-		aliasHit = true
+		aliasCat = canonical
+		kindParts = append(kindParts, "alias")
 	}
 
 	// Direct keyword match: BM25(weight, IDF, dl, avgdl).
 	if weight, ok := entry.Keywords[tok]; ok {
-		return delta + bm25(weight, mul, dl, avgdl), true, aliasHit
+		kindStr := strings.Join(append(kindParts, "direct"), "+")
+		if len(kindParts) == 0 {
+			kindStr = "direct"
+		}
+		return tokenScore{Delta: delta + bm25(weight, mul, dl, avgdl), Kind: kindStr, Weight: weight, AliasCat: aliasCat}
 	}
 
 	// Plural normalization: BM25 × 0.9.
 	if weight, ok := entry.Keywords[tok+"s"]; ok {
-		return delta + bm25(weight, mul, dl, avgdl)*0.9, true, aliasHit
+		kindStr := strings.Join(append(kindParts, "plural"), "+")
+		if len(kindParts) == 0 {
+			kindStr = "plural"
+		}
+		return tokenScore{Delta: delta + bm25(weight, mul, dl, avgdl)*0.9, Kind: kindStr, Weight: weight, AliasCat: aliasCat}
 	}
 	if stem, ok := strings.CutSuffix(tok, "s"); ok {
 		if weight, ok := entry.Keywords[stem]; ok {
-			return delta + bm25(weight, mul, dl, avgdl)*0.9, true, aliasHit
+			kindStr := strings.Join(append(kindParts, "plural"), "+")
+			if len(kindParts) == 0 {
+				kindStr = "plural"
+			}
+			return tokenScore{Delta: delta + bm25(weight, mul, dl, avgdl)*0.9, Kind: kindStr, Weight: weight, AliasCat: aliasCat}
 		}
 	}
 
@@ -164,13 +325,20 @@ func scoreToken(entry index.Entry, tok string, idf map[string]float64, dl, avgdl
 	if len(tok) >= 4 {
 		for kw, weight := range entry.Keywords {
 			if HasStemMatch(tok, kw) {
-				return delta + bm25(weight, mul, dl, avgdl)*0.6, true, aliasHit
+				kindStr := strings.Join(append(kindParts, "stem"), "+")
+				if len(kindParts) == 0 {
+					kindStr = "stem"
+				}
+				return tokenScore{Delta: delta + bm25(weight, mul, dl, avgdl)*0.6, Kind: kindStr, Weight: weight, AliasCat: aliasCat}
 			}
 		}
 	}
 
 	// Return alias-only contribution, if any.
-	return delta, delta > 0, aliasHit
+	if delta > 0 {
+		return tokenScore{Delta: delta, Kind: strings.Join(kindParts, "+"), AliasCat: aliasCat}
+	}
+	return tokenScore{Kind: "miss"}
 }
 
 // buildBigrams returns consecutive token pairs.

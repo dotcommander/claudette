@@ -547,3 +547,97 @@ func TestHasStemMatch(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyUsageBoost(t *testing.T) {
+	t.Parallel()
+
+	const epsilon = 0.001
+
+	tests := []struct {
+		name     string
+		score    float64
+		hitCount int
+		want     float64
+	}{
+		{name: "zero hits returns score unchanged", score: 10.0, hitCount: 0, want: 10.0},
+		{name: "negative hits returns score unchanged", score: 10.0, hitCount: -5, want: 10.0},
+		{name: "one hit ~ 1.069x", score: 10.0, hitCount: 1, want: 10.693},
+		{name: "ten hits ~ 1.240x", score: 10.0, hitCount: 10, want: 12.398},
+		{name: "hundred hits ~ 1.462x", score: 10.0, hitCount: 100, want: 14.615},
+		{name: "thousand hits ~ 1.691x", score: 10.0, hitCount: 1000, want: 16.909},
+		{name: "zero score stays zero", score: 0.0, hitCount: 1000, want: 0.0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := applyUsageBoost(tc.score, tc.hitCount)
+			if diff := got - tc.want; diff > epsilon || diff < -epsilon {
+				t.Errorf("applyUsageBoost(%v, %d) = %v, want ~%v (±%v)",
+					tc.score, tc.hitCount, got, tc.want, epsilon)
+			}
+		})
+	}
+}
+
+// TestScore_UsageBoostReRanks verifies that HitCount causes re-ranking when
+// raw scores are close enough that the boost crosses a rounding boundary.
+func TestScore_UsageBoostReRanks(t *testing.T) {
+	t.Parallel()
+
+	// Two entries with identical raw scoring: both match "goroutine" weight 3.
+	// Entry "popular" has HitCount=100 → boost ~1.462 → raw 3 × 1.462 = 4.386 → rounds to 4.
+	// Entry "unused"  has HitCount=0   → boost 1.0      → raw 3 × 1.0   = 3.000 → rounds to 3.
+	// "popular" MUST sort before "unused".
+	popular := makeEntry("popular", "Popular Entry", "go",
+		map[string]int{"goroutine": 3}, nil)
+	popular.HitCount = 100
+
+	unused := makeEntry("unused", "Unused Entry", "go",
+		map[string]int{"goroutine": 3}, nil)
+	// HitCount left at zero value.
+
+	// Order the input deliberately with "unused" first so a passing test proves
+	// the re-rank is caused by the boost, not input order.
+	entries := []index.Entry{unused, popular}
+	results := Score(entries, []string{"goroutine"}, 1, nil, 0)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].Entry.Name != "popular" {
+		t.Errorf("expected popular first (HitCount=100), got %q first", results[0].Entry.Name)
+		for i, r := range results {
+			t.Logf("  [%d] name=%s score=%d hitCount=%d",
+				i, r.Entry.Name, r.Score, r.Entry.HitCount)
+		}
+	}
+	if results[0].Score <= results[1].Score {
+		t.Errorf("expected boosted score strictly greater than unboosted: popular=%d unused=%d",
+			results[0].Score, results[1].Score)
+	}
+}
+
+// TestScore_UsageBoostZeroHitIsIdentity verifies that entries with HitCount=0
+// score identically to the pre-boost behavior. This is the regression guard:
+// introducing the boost must not perturb results for entries that have never
+// been hit (which is the common case in a fresh install).
+func TestScore_UsageBoostZeroHitIsIdentity(t *testing.T) {
+	t.Parallel()
+
+	// Reuse the exact fixture from TestScore case 2 ("direct keyword match")
+	// which expects score=3 for a weight-3 direct match with nil IDF.
+	entries := []index.Entry{
+		makeEntry("channel-entry", "Channel Basics", "go",
+			map[string]int{"channel": 3}, nil),
+	}
+
+	results := Score(entries, []string{"channel"}, 1, nil, 0)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Score != 3 {
+		t.Errorf("zero-HitCount entry scored %d, want 3 (pre-boost behavior must be preserved)",
+			results[0].Score)
+	}
+}
