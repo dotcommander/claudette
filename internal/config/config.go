@@ -95,9 +95,17 @@ func SaveConfig(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := MarshalIndent(cfg)
 	if err != nil {
 		return err
 	}
 	return writeJSONFile(path, data)
+}
+
+// MarshalIndent returns cfg as pretty-printed JSON bytes with 2-space indent,
+// matching SaveConfig's on-disk format. Callers that need the same bytes for
+// display (e.g., `config show`) must use this rather than calling
+// json.MarshalIndent directly so the disk and display formats cannot drift.
+func MarshalIndent(cfg Config) ([]byte, error) {
+	return json.MarshalIndent(cfg, "", "  ")
 }

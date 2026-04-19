@@ -99,21 +99,29 @@ func WriteScanSummary(w io.Writer, entries []index.Entry) {
 	output.WriteScanSummary(w, counts, len(entries))
 }
 
-// FormatPrompt joins args into a single search prompt.
-func FormatPrompt(args []string) string {
-	return strings.Join(args, " ")
+// FormatPrompt joins args into a single search prompt and rejects empty
+// or whitespace-only input. Returns the trimmed prompt on success.
+func FormatPrompt(args []string) (string, error) {
+	return validatePrompt(strings.Join(args, " "), "prompt")
 }
 
-// ReadPromptFromReader reads the full contents of r, trims trailing whitespace,
-// and returns the result. Returns an error if the result is empty.
+// ReadPromptFromReader reads the full contents of r and returns the trimmed
+// result. Returns an error if the result is empty or whitespace-only.
 func ReadPromptFromReader(r io.Reader) (string, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return "", fmt.Errorf("reading stdin: %w", err)
 	}
-	prompt := strings.TrimRight(string(data), "\r\n\t ")
-	if prompt == "" {
-		return "", fmt.Errorf("stdin is empty: provide a non-empty prompt")
+	return validatePrompt(string(data), "stdin")
+}
+
+// validatePrompt trims whitespace and rejects empty input. source is the
+// label used in the error message ("prompt" for args, "stdin" for piped input)
+// so callers see which input path failed without re-wrapping.
+func validatePrompt(s, source string) (string, error) {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return "", fmt.Errorf("%s is empty: provide a non-empty prompt", source)
 	}
-	return prompt, nil
+	return trimmed, nil
 }

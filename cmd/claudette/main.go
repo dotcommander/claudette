@@ -67,6 +67,7 @@ func rootCmd() *cobra.Command {
 		installCmd(),
 		uninstallCmd(),
 		updateCmd(),
+		configCmd(),
 		versionCmd(),
 		projectsCmd(),
 		sessionsCmd(),
@@ -85,10 +86,12 @@ func newSearchCmd(filter string, stdin io.Reader) *cobra.Command {
 	}
 
 	opts := actions.NewSearchOpts()
+	example := fmt.Sprintf("  claudette %s \"how do goroutines work\"", use)
 	cmd := &cobra.Command{
-		Use:   use + " [prompt...]",
-		Short: short,
-		Args:  cobra.MinimumNArgs(1),
+		Use:     use + " [prompt...]",
+		Short:   short,
+		Example: example,
+		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prompt, err := resolvePrompt(args, stdin)
 			if err != nil {
@@ -130,11 +133,13 @@ func explainCmd(stdin io.Reader) *cobra.Command {
 
 // resolvePrompt returns the search prompt from args or stdin.
 // When the sole argument is "-", the prompt is read from r.
+// Both paths reject empty or whitespace-only input via FormatPrompt/
+// ReadPromptFromReader's shared validator.
 func resolvePrompt(args []string, r io.Reader) (string, error) {
 	if len(args) == 1 && args[0] == "-" {
 		return actions.ReadPromptFromReader(r)
 	}
-	return actions.FormatPrompt(args), nil
+	return actions.FormatPrompt(args)
 }
 
 func scanCmd() *cobra.Command {
@@ -197,6 +202,35 @@ func updateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&check, "check", false, "Print current vs. latest release without installing")
+	return cmd
+}
+
+func configCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "Inspect claudette's persistent configuration",
+		Long: "Read-only access to ~/.config/claudette/config.json. " +
+			"Use 'config show' to print the full JSON or 'config path' to " +
+			"print just the filesystem path (useful in shell pipelines).",
+	}
+	cmd.AddCommand(
+		&cobra.Command{
+			Use:     "show",
+			Short:   "Print the current config as pretty-printed JSON",
+			Example: "  claudette config show",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return actions.ShowConfig(os.Stdout)
+			},
+		},
+		&cobra.Command{
+			Use:     "path",
+			Short:   "Print the filesystem path to the config file",
+			Example: "  cat \"$(claudette config path)\"",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return actions.ShowConfigPath(os.Stdout)
+			},
+		},
+	)
 	return cmd
 }
 

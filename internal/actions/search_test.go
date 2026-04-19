@@ -5,6 +5,37 @@ import (
 	"testing"
 )
 
+func TestFormatPrompt(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		args    []string
+		want    string
+		wantErr bool
+	}{
+		{"single word", []string{"goroutines"}, "goroutines", false},
+		{"multiple words", []string{"refactor", "legacy", "code"}, "refactor legacy code", false},
+		{"leading whitespace stripped", []string{"   hello"}, "hello", false},
+		{"trailing whitespace stripped", []string{"hello   "}, "hello", false},
+		{"empty string arg", []string{""}, "", true},
+		{"whitespace only", []string{"   "}, "", true},
+		{"multiple empty args", []string{"", "", ""}, "", true},
+		{"no args", nil, "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := FormatPrompt(tc.args)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestReadPromptFromReader_Normal verifies a plain string is returned unchanged.
 func TestReadPromptFromReader_Normal(t *testing.T) {
 	t.Parallel()

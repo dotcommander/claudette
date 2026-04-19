@@ -65,6 +65,22 @@ func TestConfig_JSONRoundTrip_PreservesCustomContextHeader(t *testing.T) {
 	}
 }
 
+func TestMarshalIndent_MatchesSaveConfigFormat(t *testing.T) {
+	t.Parallel()
+	cfg := Config{
+		SourceDirs:    []string{"/tmp/a", "/tmp/b"},
+		ContextHeader: "custom header",
+	}
+	data, err := MarshalIndent(cfg)
+	if err != nil {
+		t.Fatalf("MarshalIndent: %v", err)
+	}
+	// Expected shape: 2-space indent, field ordering from struct tags.
+	if !strings.Contains(string(data), "\n  \"source_dirs\":") {
+		t.Errorf("MarshalIndent output not 2-space indented: %s", data)
+	}
+}
+
 // TestLoadConfig_ReadsContextHeaderFromDisk redirects HOME to a temp dir, so
 // ConfigPath() resolves inside the sandbox and we can exercise the real
 // LoadConfig path without mocking. This test cannot run with t.Parallel()
