@@ -9,9 +9,9 @@ import (
 	"github.com/dotcommander/claudette/internal/usage"
 )
 
-// makeScoredEntries builds a slice of ScoredEntry with the given integer scores.
+// gateFixtureScores builds ScoredEntry fixtures for gate tests.
 // Each entry gets two matched tokens so single-token suppression does not interfere.
-func makeScoredEntries(scores ...int) []search.ScoredEntry {
+func gateFixtureScores(scores ...int) []search.ScoredEntry {
 	out := make([]search.ScoredEntry, len(scores))
 	for i, s := range scores {
 		out[i] = search.ScoredEntry{
@@ -139,48 +139,59 @@ func TestFormatContext_CustomHeader(t *testing.T) {
 	}
 }
 
-// --- Differential suppression gate tests ---
-// These exercise applyDifferentialGate directly with fixture scores so the
-// tests are deterministic and independent of real index entries or scoring
-// formula changes.
+// --- Differential suppression gate tests (via ApplyGates) ---
+// These exercise ApplyGates directly with fixture scores so the tests are
+// deterministic and independent of real index entries or scoring formula
+// changes. makeScoredEntries gives each entry 2 matched tokens so the
+// single-token gate does not fire; scores are kept below the low-confidence
+// threshold only when that gate is under test.
 
 // TestScoreAndRespondTo_DifferentialGate_SuppressesWhenTopLessThanCeilingAndGapSmall
-// verifies that scores [6, 5, 3] — top below ceiling, gap < minScoreGap — are
+// verifies that scores [6, 5, 3] — top below ceiling(10), gap < minScoreGap(2) — are
 // trimmed to 1 result.
 func TestScoreAndRespondTo_DifferentialGate_SuppressesWhenTopLessThanCeilingAndGapSmall(t *testing.T) {
 	t.Parallel()
-	hits := makeScoredEntries(6, 5, 3)
-	got := applyDifferentialGate(hits)
+	hits := gateFixtureScores(6, 5, 3)
+	got, reason := search.ApplyGates(hits)
 	if len(got) != 1 {
-		t.Errorf("expected 1 result, got %d (scores: 6,5,3; gap=1 < minScoreGap=%d, top=%d < softCeiling=%d)",
-			len(got), minScoreGap, hits[0].Score, softCeiling)
+		t.Errorf("expected 1 result, got %d (scores: 6,5,3; gap=1 < minScoreGap=2, top=%d < softCeiling=10)",
+			len(got), hits[0].Score)
 	}
 	if got[0].Score != 6 {
 		t.Errorf("surviving result should have score 6, got %d", got[0].Score)
 	}
+	if reason != search.GateReasonDifferential {
+		t.Errorf("expected reason %q, got %q", search.GateReasonDifferential, reason)
+	}
 }
 
 // TestScoreAndRespondTo_DifferentialGate_PreservesWhenGapLarge verifies that
-// scores [6, 3] — gap >= minScoreGap — are returned intact.
+// scores [6, 3] — gap >= minScoreGap(2) — are returned intact.
 func TestScoreAndRespondTo_DifferentialGate_PreservesWhenGapLarge(t *testing.T) {
 	t.Parallel()
-	hits := makeScoredEntries(6, 3)
-	got := applyDifferentialGate(hits)
+	hits := gateFixtureScores(6, 3)
+	got, reason := search.ApplyGates(hits)
 	if len(got) != 2 {
-		t.Errorf("expected 2 results, got %d (scores: 6,3; gap=3 >= minScoreGap=%d)", len(got), minScoreGap)
+		t.Errorf("expected 2 results, got %d (scores: 6,3; gap=3 >= minScoreGap=2)", len(got))
+	}
+	if reason != search.GateReasonNone {
+		t.Errorf("expected no suppression reason, got %q", reason)
 	}
 }
 
 // TestScoreAndRespondTo_DifferentialGate_PreservesWhenAboveCeiling verifies
-// that scores [15, 14] — top at or above softCeiling — are returned intact
+// that scores [15, 14] — top at or above softCeiling(10) — are returned intact
 // even though the gap is only 1.
 func TestScoreAndRespondTo_DifferentialGate_PreservesWhenAboveCeiling(t *testing.T) {
 	t.Parallel()
-	hits := makeScoredEntries(15, 14)
-	got := applyDifferentialGate(hits)
+	hits := gateFixtureScores(15, 14)
+	got, reason := search.ApplyGates(hits)
 	if len(got) != 2 {
-		t.Errorf("expected 2 results above ceiling, got %d (scores: 15,14; top=%d >= softCeiling=%d)",
-			len(got), hits[0].Score, softCeiling)
+		t.Errorf("expected 2 results above ceiling, got %d (scores: 15,14; top=%d >= softCeiling=10)",
+			len(got), hits[0].Score)
+	}
+	if reason != search.GateReasonNone {
+		t.Errorf("expected no suppression reason, got %q", reason)
 	}
 }
 
@@ -188,25 +199,31 @@ func TestScoreAndRespondTo_DifferentialGate_PreservesWhenAboveCeiling(t *testing
 // single-result slice passes through unchanged.
 func TestScoreAndRespondTo_DifferentialGate_SingleResult_NoOp(t *testing.T) {
 	t.Parallel()
-	hits := makeScoredEntries(6)
-	got := applyDifferentialGate(hits)
+	hits := gateFixtureScores(6)
+	got, reason := search.ApplyGates(hits)
 	if len(got) != 1 {
 		t.Errorf("expected 1 result (no-op on single), got %d", len(got))
 	}
 	if got[0].Score != 6 {
 		t.Errorf("score should be unchanged at 6, got %d", got[0].Score)
 	}
+	if reason != search.GateReasonNone {
+		t.Errorf("expected no suppression reason, got %q", reason)
+	}
 }
 
 // TestScoreAndRespondTo_DifferentialGate_ExactlyAtCeiling_NoSuppression verifies
-// that scores [10, 9] — top exactly at softCeiling — are NOT suppressed (strict <).
+// that scores [10, 9] — top exactly at softCeiling(10) — are NOT suppressed (strict <).
 func TestScoreAndRespondTo_DifferentialGate_ExactlyAtCeiling_NoSuppression(t *testing.T) {
 	t.Parallel()
-	hits := makeScoredEntries(10, 9)
-	got := applyDifferentialGate(hits)
+	hits := gateFixtureScores(10, 9)
+	got, reason := search.ApplyGates(hits)
 	if len(got) != 2 {
-		t.Errorf("expected 2 results at exact ceiling, got %d (scores: 10,9; top=%d, softCeiling=%d, strict < means no suppression)",
-			len(got), hits[0].Score, softCeiling)
+		t.Errorf("expected 2 results at exact ceiling, got %d (scores: 10,9; top=%d, softCeiling=10, strict < means no suppression)",
+			len(got), hits[0].Score)
+	}
+	if reason != search.GateReasonNone {
+		t.Errorf("expected no suppression reason, got %q", reason)
 	}
 }
 

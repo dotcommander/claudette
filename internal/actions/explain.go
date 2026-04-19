@@ -3,6 +3,9 @@ package actions
 import (
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/dotcommander/claudette/internal/output"
 	"github.com/dotcommander/claudette/internal/search"
@@ -40,24 +43,45 @@ func Explain(w io.Writer, prompt string, opts ExplainOpts) error {
 	}
 
 	stopWords := search.DefaultStopWords()
-	rawTokens := search.Tokenize(prompt, nil)    // pre-stop-word for display
-	tokens := search.Tokenize(prompt, stopWords) // what the scorer actually uses
-	diags := search.ScoreExplained(idx.Entries, tokens, search.DefaultThreshold, idx.IDF, idx.AvgFieldLen)
+	rawTokens := search.Tokenize(prompt, nil)
+	tokens := search.Tokenize(prompt, stopWords)
+
+	pr := search.Run(search.PipelineInput{
+		Tokens:      tokens,
+		Entries:     idx.Entries,
+		IDF:         idx.IDF,
+		AvgFieldLen: idx.AvgFieldLen,
+		Threshold:   search.DefaultThreshold,
+		Limit:       0,
+		ApplyGates:  true,
+	})
 
 	limit := opts.Limit
-	if limit <= 0 || limit > len(diags) {
-		limit = len(diags)
+	if limit <= 0 || limit > len(pr.Diagnostics) {
+		limit = len(pr.Diagnostics)
+	}
+
+	wouldSurface := make([]output.WouldSurfaceEntry, len(pr.Surviving))
+	homePrefix := explainHomePrefix()
+	for i, s := range pr.Surviving {
+		wouldSurface[i] = output.WouldSurfaceEntry{
+			Path:    trimHomePrefix(s.Entry.FilePath, homePrefix),
+			Title:   s.Entry.Title,
+			Matched: s.Matched,
+		}
 	}
 
 	report := output.ExplainReport{
-		Prompt:       prompt,
-		RawTokens:    rawTokens,
-		KeptTokens:   tokens,
-		DroppedStops: diffTokens(rawTokens, tokens),
-		AvgFieldLen:  idx.AvgFieldLen,
-		HasIDF:       idx.IDF != nil,
-		Diagnostics:  diags[:limit],
-		TotalScored:  len(diags),
+		Prompt:            prompt,
+		RawTokens:         rawTokens,
+		KeptTokens:        tokens,
+		DroppedStops:      diffTokens(rawTokens, tokens),
+		AvgFieldLen:       idx.AvgFieldLen,
+		HasIDF:            idx.IDF != nil,
+		Diagnostics:       pr.Diagnostics[:limit],
+		TotalScored:       len(pr.Diagnostics),
+		WouldSurface:      wouldSurface,
+		SuppressionReason: string(pr.Suppression),
 	}
 
 	if opts.JSON {
@@ -65,6 +89,24 @@ func Explain(w io.Writer, prompt string, opts ExplainOpts) error {
 	}
 	output.WriteExplainText(w, report)
 	return nil
+}
+
+// explainHomePrefix returns the absolute path prefix for ~/.claude/ used to
+// produce display paths that match what formatContext emits in full mode.
+func explainHomePrefix() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".claude") + string(os.PathSeparator)
+	}
+	return ""
+}
+
+// trimHomePrefix replaces a leading absolute ~/.claude/ prefix with the
+// tilde-relative form (~/.claude/…) so display paths match hook full-mode output.
+func trimHomePrefix(path, prefix string) string {
+	if prefix != "" && strings.HasPrefix(path, prefix) {
+		return "~/.claude/" + strings.TrimPrefix(path, prefix)
+	}
+	return path
 }
 
 // diffTokens returns the elements in a that are not in b (set difference).

@@ -378,6 +378,27 @@ func scoreToken(entry index.Entry, tok string, idf map[string]float64, dl, avgdl
 	return tokenScore{Kind: "miss"}
 }
 
+// matchedTermsFromDiagnostic derives the Matched slice from EntryDiagnostics
+// using the same sort/dedup rules Score's internal pipeline applies. Exposed
+// so Run produces byte-identical ScoredEntry.Matched values without re-running
+// the scorer.
+func matchedTermsFromDiagnostic(d EntryDiagnostics) []string {
+	terms := make([]matchTerm, 0, len(d.TokenHits)+len(d.BigramHits))
+	for _, h := range d.TokenHits {
+		if h.Kind != "miss" {
+			terms = append(terms, matchTerm{term: h.Token, delta: h.Delta})
+		}
+	}
+	for i, bg := range d.BigramHits {
+		var delta float64
+		if i < len(d.BigramDeltas) {
+			delta = d.BigramDeltas[i]
+		}
+		terms = append(terms, matchTerm{term: bg, delta: delta})
+	}
+	return sortedDedupMatchTerms(terms)
+}
+
 // buildBigrams returns consecutive token pairs.
 func buildBigrams(tokens []string) []string {
 	if len(tokens) < 2 {

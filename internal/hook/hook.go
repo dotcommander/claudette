@@ -20,14 +20,6 @@ import (
 // maxStdinBytes caps stdin reads to prevent unbounded memory use.
 const maxStdinBytes = 1 << 20 // 1MB
 
-// Differential suppression tuning — hook path only (not search/explain).
-// When the top score is below softCeiling and the gap to 2nd place is smaller
-// than minScoreGap, confidence is too low to return multiple entries — suppress to 1.
-const (
-	minScoreGap = 2  // top must lead 2nd by this margin when score is below ceiling
-	softCeiling = 10 // at or above this score, confidence is high enough — return all
-)
-
 // contextOpenTag and contextCloseTag are the XML protocol markers wrapping
 // the additional-context block emitted to Claude Code. The triage
 // instruction between them is user-configurable via Config.ContextHeader;
@@ -209,37 +201,34 @@ func scoreTokens(tokens []string) scoreResult {
 		return scoreResult{status: "skip: index load failed"}
 	}
 
-	hits := search.ScoreTop(idx.Entries, tokens, search.DefaultThreshold, search.DefaultLimit, idx.IDF, idx.AvgFieldLen)
-	if len(hits) == 0 {
-		// Record the miss for cluster analysis; best-effort (failure is silent).
+	pr := search.Run(search.PipelineInput{
+		Tokens:      tokens,
+		Entries:     idx.Entries,
+		IDF:         idx.IDF,
+		AvgFieldLen: idx.AvgFieldLen,
+		Threshold:   search.DefaultThreshold,
+		Limit:       search.DefaultLimit,
+		ApplyGates:  true,
+	})
+
+	if len(pr.AboveThreshold) == 0 {
 		_ = usage.AppendMissLog(tokens)
 		return scoreResult{rebuildDur: rebuildDur, status: fmt.Sprintf("%v -> no matches", tokens), idx: idx}
 	}
-	if hits[0].Score < search.DefaultThreshold*search.DefaultConfidenceMultiplier {
-		return scoreResult{rebuildDur: rebuildDur, status: fmt.Sprintf("%v -> suppressed (low confidence, top score %d)", tokens, hits[0].Score), idx: idx}
-	}
-	if len(hits[0].Matched) < 2 && hits[0].Score < search.DefaultSingleTokenFloor {
-		return scoreResult{rebuildDur: rebuildDur, status: fmt.Sprintf("%v -> suppressed (single-token weak match, score %d)", tokens, hits[0].Score), idx: idx}
+
+	topScore := pr.AboveThreshold[0].Score
+	switch pr.Suppression {
+	case search.GateReasonLowConfidence:
+		return scoreResult{rebuildDur: rebuildDur, status: fmt.Sprintf("%v -> suppressed (low confidence, top score %d)", tokens, topScore), idx: idx}
+	case search.GateReasonSingleTokenFloor:
+		return scoreResult{rebuildDur: rebuildDur, status: fmt.Sprintf("%v -> suppressed (single-token weak match, score %d)", tokens, topScore), idx: idx}
 	}
 
-	hits = applyDifferentialGate(hits)
-
-	names := make([]string, len(hits))
-	for i, r := range hits {
+	names := make([]string, len(pr.Surviving))
+	for i, r := range pr.Surviving {
 		names[i] = fmt.Sprintf("%s(%d)", r.Entry.Name, r.Score)
 	}
-	return scoreResult{hits: hits, rebuildDur: rebuildDur, status: fmt.Sprintf("%v -> %s", tokens, strings.Join(names, ", ")), idx: idx}
-}
-
-// applyDifferentialGate suppresses to 1 result when confidence is diffuse:
-// top score is below softCeiling AND the gap to 2nd place is smaller than
-// minScoreGap. Above softCeiling the margin between entries is irrelevant —
-// return all. Single-result slices are a no-op.
-func applyDifferentialGate(hits []search.ScoredEntry) []search.ScoredEntry {
-	if len(hits) >= 2 && hits[0].Score < softCeiling && (hits[0].Score-hits[1].Score) < minScoreGap {
-		return hits[:1]
-	}
-	return hits
+	return scoreResult{hits: pr.Surviving, rebuildDur: rebuildDur, status: fmt.Sprintf("%v -> %s", tokens, strings.Join(names, ", ")), idx: idx}
 }
 
 // --- Helpers ---

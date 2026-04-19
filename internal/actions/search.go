@@ -53,7 +53,15 @@ func Search(w io.Writer, prompt, filter string, opts SearchOpts) error {
 	}
 
 	tokens := search.Tokenize(prompt, search.DefaultStopWords())
-	results := search.ScoreTop(entries, tokens, opts.Threshold, opts.Limit, idx.IDF, idx.AvgFieldLen)
+	pr := search.Run(search.PipelineInput{
+		Tokens:      tokens,
+		Entries:     entries,
+		IDF:         idx.IDF,
+		AvgFieldLen: idx.AvgFieldLen,
+		Threshold:   opts.Threshold,
+		Limit:       opts.Limit,
+		ApplyGates:  false,
+	})
 
 	format := opts.Format
 	if opts.JSON {
@@ -61,9 +69,9 @@ func Search(w io.Writer, prompt, filter string, opts SearchOpts) error {
 	}
 	switch format {
 	case "json":
-		return output.WriteJSON(w, results)
+		return output.WriteJSON(w, pr.AboveThreshold)
 	default:
-		output.WriteText(w, results)
+		output.WriteText(w, pr.AboveThreshold)
 		return nil
 	}
 }
