@@ -20,6 +20,14 @@ import (
 // maxStdinBytes caps stdin reads to prevent unbounded memory use.
 const maxStdinBytes = 1 << 20 // 1MB
 
+// Differential suppression tuning — hook path only (not search/explain).
+// When the top score is below softCeiling and the gap to 2nd place is smaller
+// than minScoreGap, confidence is too low to return multiple entries — suppress to 1.
+const (
+	minScoreGap = 2  // top must lead 2nd by this margin when score is below ceiling
+	softCeiling = 10 // at or above this score, confidence is high enough — return all
+)
+
 // contextOpenTag and contextCloseTag are the XML protocol markers wrapping
 // the additional-context block emitted to Claude Code. The triage
 // instruction between them is user-configurable via Config.ContextHeader;
@@ -117,91 +125,121 @@ func runHook(m hookMode) error {
 // swapping global file descriptors.
 // Returns nil on all skip paths; returns err only on stdin read failure.
 func runHookIO(r io.Reader, w io.Writer, m hookMode) error {
-	var status string
-	defer logStatus(m.statusPrefix, &status, time.Now())()
+	var hs HookStatus
+	var diagStatus string
+	defer logStatus(m.statusPrefix, &diagStatus, &hs, time.Now())()
 
 	data, err := readAllLimited(r)
 	if err != nil {
-		status = "stdin error"
+		diagStatus = "stdin error"
 		return err
 	}
 
 	text, ok := m.extract(data)
 	if !ok {
-		status = "skip: malformed input"
+		diagStatus = "skip: malformed input"
 		return nil
 	}
 	if text == "" {
-		status = m.emptyReason
+		diagStatus = m.emptyReason
 		return nil
 	}
 	if m.rejectSlash && strings.HasPrefix(text, "/") {
-		status = "skip: slash command"
+		diagStatus = "skip: slash command"
 		return nil
 	}
 
 	tokens := search.Tokenize(text, search.DefaultStopWords())
 	if len(tokens) == 0 {
-		status = "skip: no searchable tokens"
+		diagStatus = "skip: no searchable tokens"
 		return nil
 	}
 
-	return scoreAndRespondTo(w, tokens, m.event, &status)
+	return scoreAndRespondTo(w, tokens, m.event, &diagStatus, &hs)
 }
 
 // --- Shared pipeline ---
 
+// scoreResult bundles the outputs of scoreTokens to stay within the 3-return limit.
+type scoreResult struct {
+	hits       []search.ScoredEntry
+	rebuildDur time.Duration
+	status     string
+	idx        index.Index
+}
+
 // scoreAndRespondTo loads the index, scores tokens, and writes a hook response to w.
-// Sets status for the deferred logStatus call. Returns nil with empty status
+// Sets diagStatus for the deferred logStatus call. Returns nil with empty diagStatus
 // when results are suppressed (no matches, low confidence).
-func scoreAndRespondTo(w io.Writer, tokens []string, event string, status *string) error {
-	results, diagStatus := scoreTokens(tokens)
-	*status = diagStatus
-	if len(results) == 0 {
+func scoreAndRespondTo(w io.Writer, tokens []string, event string, diagStatus *string, hs *HookStatus) error {
+	now := time.Now()
+	sr := scoreTokens(tokens)
+	*diagStatus = sr.status
+	hs.RebuildMs = int(sr.rebuildDur.Milliseconds())
+	populateAdvisoryFields(hs, &sr.idx, now)
+	if len(sr.hits) == 0 {
 		return nil
 	}
 
-	logUsage(results)
+	logUsage(sr.hits)
+	logCoOccurrence(tokens, sr.hits)
 
 	cfg, _ := config.LoadConfig() // zero-value Config falls back to defaults
+	ctx := formatContext(sr.hits, outputMode(), cfg.ContextHeaderOrDefault())
 	resp := hookResponse{
 		HookSpecificOutput: &hookSpecificOutput{
 			HookEventName:     event,
-			AdditionalContext: formatContext(results, outputMode(), cfg.ContextHeaderOrDefault()),
+			AdditionalContext: ctx,
 		},
 	}
 	return json.NewEncoder(w).Encode(resp)
 }
 
 // scoreTokens loads the index and scores tokens against it.
-// Returns (nil, status) when results should be suppressed.
-func scoreTokens(tokens []string) ([]search.ScoredEntry, string) {
+// sr.hits is nil when results should be suppressed; sr.idx is always set on
+// successful load so callers can populate advisory fields (e.g. IndexAgeDays).
+func scoreTokens(tokens []string) scoreResult {
 	sourceDirs, err := index.SourceDirs()
 	if err != nil {
-		return nil, "skip: source discovery failed"
+		return scoreResult{status: "skip: source discovery failed"}
 	}
 
-	idx, err := index.LoadOrRebuild(sourceDirs)
+	idx, rebuildDur, err := index.LoadOrRebuild(sourceDirs)
 	if err != nil {
-		return nil, "skip: index load failed"
+		return scoreResult{status: "skip: index load failed"}
 	}
 
 	hits := search.ScoreTop(idx.Entries, tokens, search.DefaultThreshold, search.DefaultLimit, idx.IDF, idx.AvgFieldLen)
 	if len(hits) == 0 {
-		return nil, fmt.Sprintf("%v -> no matches", tokens)
+		// Record the miss for cluster analysis; best-effort (failure is silent).
+		_ = usage.AppendMissLog(tokens)
+		return scoreResult{rebuildDur: rebuildDur, status: fmt.Sprintf("%v -> no matches", tokens), idx: idx}
 	}
 	if hits[0].Score < search.DefaultThreshold*search.DefaultConfidenceMultiplier {
-		return nil, fmt.Sprintf("%v -> suppressed (low confidence, top score %d)", tokens, hits[0].Score)
+		return scoreResult{rebuildDur: rebuildDur, status: fmt.Sprintf("%v -> suppressed (low confidence, top score %d)", tokens, hits[0].Score), idx: idx}
 	}
 	if len(hits[0].Matched) < 2 && hits[0].Score < search.DefaultSingleTokenFloor {
-		return nil, fmt.Sprintf("%v -> suppressed (single-token weak match, score %d)", tokens, hits[0].Score)
+		return scoreResult{rebuildDur: rebuildDur, status: fmt.Sprintf("%v -> suppressed (single-token weak match, score %d)", tokens, hits[0].Score), idx: idx}
 	}
+
+	hits = applyDifferentialGate(hits)
 
 	names := make([]string, len(hits))
 	for i, r := range hits {
 		names[i] = fmt.Sprintf("%s(%d)", r.Entry.Name, r.Score)
 	}
-	return hits, fmt.Sprintf("%v -> %s", tokens, strings.Join(names, ", "))
+	return scoreResult{hits: hits, rebuildDur: rebuildDur, status: fmt.Sprintf("%v -> %s", tokens, strings.Join(names, ", ")), idx: idx}
+}
+
+// applyDifferentialGate suppresses to 1 result when confidence is diffuse:
+// top score is below softCeiling AND the gap to 2nd place is smaller than
+// minScoreGap. Above softCeiling the margin between entries is irrelevant —
+// return all. Single-result slices are a no-op.
+func applyDifferentialGate(hits []search.ScoredEntry) []search.ScoredEntry {
+	if len(hits) >= 2 && hits[0].Score < softCeiling && (hits[0].Score-hits[1].Score) < minScoreGap {
+		return hits[:1]
+	}
+	return hits
 }
 
 // --- Helpers ---
@@ -270,9 +308,74 @@ func logUsage(results []search.ScoredEntry) {
 	_ = usage.AppendUsageLog(records)
 }
 
-func logStatus(prefix string, status *string, start time.Time) func() {
+// logCoOccurrence records which prompt tokens went unmatched alongside which
+// entries were returned. Used to surface alias candidates during index rebuild.
+// All errors are silently swallowed — co-occurrence recording must never block.
+func logCoOccurrence(tokens []string, hits []search.ScoredEntry) {
+	if len(hits) == 0 {
+		return
+	}
+
+	// Build the set of tokens already matched by the hit entries.
+	matchedSet := make(map[string]bool)
+	for _, h := range hits {
+		for kw := range h.Entry.Keywords {
+			matchedSet[strings.ToLower(kw)] = true
+		}
+	}
+
+	unmatched := computeUnmatched(tokens, matchedSet)
+	if len(unmatched) == 0 {
+		return
+	}
+
+	// Cap hit entries at 5 to keep records small.
+	n := len(hits)
+	if n > 5 {
+		n = 5
+	}
+	hitEntries := make([]string, n)
+	for i := range hitEntries {
+		hitEntries[i] = hits[i].Entry.Name
+	}
+
+	coPath, err := usage.CoOccurrenceLogPath()
+	if err != nil {
+		return
+	}
+	_ = usage.AppendCoOccurrenceLog(coPath, usage.CoOccurrenceRecord{
+		Timestamp:       time.Now(),
+		UnmatchedTokens: unmatched,
+		HitEntries:      hitEntries,
+	})
+}
+
+// computeUnmatched returns tokens that do not appear in matchedSet, deduplicated
+// and capped at MaxUnmatchedPerRecord. Lowercased to match keyword storage.
+func computeUnmatched(tokens []string, matchedSet map[string]bool) []string {
+	seen := make(map[string]bool, len(tokens))
+	var out []string
+	for _, tok := range tokens {
+		lower := strings.ToLower(tok)
+		if matchedSet[lower] || seen[lower] {
+			continue
+		}
+		seen[lower] = true
+		out = append(out, lower)
+		if len(out) >= usage.MaxUnmatchedPerRecord {
+			break
+		}
+	}
+	return out
+}
+
+// logStatus emits the stderr diagnostic line. When all HookStatus advisory
+// fields are zero, advisoryStatusSegment returns "" and the output is
+// byte-identical to the pre-advisory format: "<prefix>: <status> (NNms)\n".
+func logStatus(prefix string, status *string, hs *HookStatus, start time.Time) func() {
 	return func() {
-		fmt.Fprintf(os.Stderr, "%s: %s (%dms)\n", prefix, *status, time.Since(start).Milliseconds())
+		seg := advisoryStatusSegment(*hs)
+		fmt.Fprintf(os.Stderr, "%s: %s%s (%dms)\n", prefix, *status, seg, time.Since(start).Milliseconds())
 	}
 }
 

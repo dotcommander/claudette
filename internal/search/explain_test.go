@@ -271,7 +271,7 @@ func TestScoreExplained_UsageBoost(t *testing.T) {
 
 	// Use "pipe"/"misc" to avoid alias interference on the score math.
 	entry := makeEntry("popular", "Popular Entry", "misc", map[string]int{"pipe": 3}, nil)
-	entry.HitCount = 100
+	entry.HitCountDecayed = 100
 
 	diags := ScoreExplained([]index.Entry{entry}, []string{"pipe"}, 0, nil, 0)
 	if len(diags) != 1 {

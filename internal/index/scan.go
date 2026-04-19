@@ -201,7 +201,7 @@ func Scan(sourceDirs []string) (ScanResult, error) {
 		if info.ModTime().After(r.MaxMtime) {
 			r.MaxMtime = info.ModTime()
 		}
-		entry, ok := parseEntry(path, sourceDir)
+		entry, ok := parseEntry(path, sourceDir, info.ModTime())
 		if ok {
 			r.Entries = append(r.Entries, entry)
 		}

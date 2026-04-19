@@ -1,11 +1,14 @@
 package index
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/dotcommander/claudette/internal/usage"
 )
 
 // --- Pure function tests (no HOME mutation — t.Parallel() safe) ---
@@ -167,7 +170,7 @@ func TestLoadOrRebuild_FreshInstall_BuildsAndSaves(t *testing.T) {
 	seedSkillFile(t, tmp, "x", minimalSkill)
 	sourceDirs := []string{filepath.Join(tmp, ".claude", "skills")}
 
-	idx, err := LoadOrRebuild(sourceDirs)
+	idx, _, err := LoadOrRebuild(sourceDirs)
 	if err != nil {
 		t.Fatalf("LoadOrRebuild: %v", err)
 	}
@@ -197,13 +200,13 @@ func TestLoadOrRebuild_CachedAndFresh_ReturnsCache(t *testing.T) {
 	sourceDirs := []string{filepath.Join(tmp, ".claude", "skills")}
 
 	// First call — builds and saves.
-	idx1, err := LoadOrRebuild(sourceDirs)
+	idx1, _, err := LoadOrRebuild(sourceDirs)
 	if err != nil {
 		t.Fatalf("first LoadOrRebuild: %v", err)
 	}
 
 	// Second call — must hit cache, not rebuild.
-	idx2, err := LoadOrRebuild(sourceDirs)
+	idx2, _, err := LoadOrRebuild(sourceDirs)
 	if err != nil {
 		t.Fatalf("second LoadOrRebuild: %v", err)
 	}
@@ -235,7 +238,7 @@ func TestLoadOrRebuild_VersionMismatch_Rebuilds(t *testing.T) {
 	}
 
 	sourceDirs := []string{filepath.Join(tmp, ".claude", "skills")}
-	idx, err := LoadOrRebuild(sourceDirs)
+	idx, _, err := LoadOrRebuild(sourceDirs)
 	if err != nil {
 		t.Fatalf("LoadOrRebuild: %v", err)
 	}
@@ -272,7 +275,7 @@ func TestLoadOrRebuild_CorruptIndex_Rebuilds(t *testing.T) {
 	}
 
 	sourceDirs := []string{filepath.Join(tmp, ".claude", "skills")}
-	idx, err := LoadOrRebuild(sourceDirs)
+	idx, _, err := LoadOrRebuild(sourceDirs)
 	if err != nil {
 		t.Fatalf("LoadOrRebuild must recover from corrupt index, got: %v", err)
 	}
@@ -355,5 +358,304 @@ func TestNeedsRebuild_SameState_ReturnsFalse(t *testing.T) {
 	// Freshly built index must not need rebuilding against the same source.
 	if NeedsRebuild(idx, []string{skillsDir}) {
 		t.Error("freshly built index must not require rebuild (same state)")
+	}
+}
+
+func TestEntry_DecayedHitCount_Populated_OnRebuild(t *testing.T) {
+	// Mutates HOME and usage log path — cannot run in parallel.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	seedSkillFile(t, tmp, "x", minimalSkill)
+	sourceDirs := []string{filepath.Join(tmp, ".claude", "skills")}
+
+	// Write a usage log with two hits for "x": one recent, one half-life ago.
+	logPath, err := usage.UsageLogPath()
+	if err != nil {
+		t.Fatalf("UsageLogPath: %v", err)
+	}
+	now := time.Now()
+	halfLife := usage.DefaultHalfLife
+	records := []usage.UsageRecord{
+		{Timestamp: now, Name: "x", Score: 5},
+		{Timestamp: now.Add(-halfLife), Name: "x", Score: 5},
+	}
+	// Write log lines directly using the TSV format.
+	var lines string
+	for _, r := range records {
+		lines += fmt.Sprintf("%d\tx\t%d\n", r.Timestamp.Unix(), r.Score)
+	}
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(logPath, []byte(lines), 0o644); err != nil {
+		t.Fatalf("write usage log: %v", err)
+	}
+
+	idx, _, err := LoadOrRebuild(sourceDirs)
+	if err != nil {
+		t.Fatalf("LoadOrRebuild: %v", err)
+	}
+
+	var found *Entry
+	for i := range idx.Entries {
+		if idx.Entries[i].Name == "x" {
+			found = &idx.Entries[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("entry 'x' not found in rebuilt index")
+	}
+
+	// HitCount (raw) must equal 2 (two records).
+	if found.HitCount != 2 {
+		t.Errorf("HitCount: got %d, want 2", found.HitCount)
+	}
+	// HitCountDecayed must be in (1.0, 1.5]: recent ≈1.0 + old ≈0.5.
+	// Allow floating-point drift: [1.49, 1.51].
+	if found.HitCountDecayed < 1.49 || found.HitCountDecayed > 1.51 {
+		t.Errorf("HitCountDecayed: got %v, want ~1.5 (recent=1.0 + half-life-old=0.5)", found.HitCountDecayed)
+	}
+}
+
+// TestCountZeroKeyword_Pure verifies the countZeroKeyword helper function in
+// isolation — no filesystem, no buildIndex. The function is the single source
+// of truth; buildIndex delegates to it.
+func TestCountZeroKeyword_Pure(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		entries []Entry
+		want    int
+	}{
+		{
+			name:    "all_have_keywords",
+			entries: []Entry{{Keywords: kw("a", "b")}, {Keywords: kw("c")}},
+			want:    0,
+		},
+		{
+			name:    "one_zero_keyword",
+			entries: []Entry{{Keywords: kw("a")}, {Keywords: nil}, {Keywords: kw("b")}},
+			want:    1,
+		},
+		{
+			name:    "all_zero_keywords",
+			entries: []Entry{{Keywords: nil}, {Keywords: map[string]int{}}},
+			want:    2,
+		},
+		{
+			name:    "empty_slice",
+			entries: nil,
+			want:    0,
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := countZeroKeyword(tc.entries); got != tc.want {
+				t.Errorf("countZeroKeyword: got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCountColdEntries_Pure verifies countColdEntries in isolation.
+// Cold = HitCount==0 AND age>90d AND age>7d (grace period).
+func TestCountColdEntries_Pure(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name    string
+		entries []Entry
+		want    int
+	}{
+		{
+			name: "old_zero_hits_is_cold",
+			entries: []Entry{
+				{HitCount: 0, FileMtime: now.Add(-100 * 24 * time.Hour)},
+			},
+			want: 1,
+		},
+		{
+			name: "brand_new_grace_not_cold",
+			entries: []Entry{
+				{HitCount: 0, FileMtime: now.Add(-5 * 24 * time.Hour)},
+			},
+			want: 0,
+		},
+		{
+			name: "old_with_hits_not_cold",
+			entries: []Entry{
+				{HitCount: 5, FileMtime: now.Add(-100 * 24 * time.Hour)},
+			},
+			want: 0,
+		},
+		{
+			name: "below_min_age_not_cold",
+			entries: []Entry{
+				{HitCount: 0, FileMtime: now.Add(-50 * 24 * time.Hour)},
+			},
+			want: 0,
+		},
+		{
+			name: "mixed_entries",
+			entries: []Entry{
+				{HitCount: 0, FileMtime: now.Add(-100 * 24 * time.Hour)}, // cold
+				{HitCount: 0, FileMtime: now.Add(-5 * 24 * time.Hour)},   // grace
+				{HitCount: 3, FileMtime: now.Add(-100 * 24 * time.Hour)}, // has hits
+				{HitCount: 0, FileMtime: now.Add(-50 * 24 * time.Hour)},  // below minAge
+			},
+			want: 1,
+		},
+		{
+			name:    "empty_slice",
+			entries: nil,
+			want:    0,
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := countColdEntries(tc.entries, now); got != tc.want {
+				t.Errorf("countColdEntries: got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildIndex_ZeroKeywordCount_PlumbedFromHelper verifies that buildIndex
+// stores ZeroKeywordCount equal to countZeroKeyword applied to its own entries.
+// This tests the wiring, not the counting logic (covered by TestCountZeroKeyword_Pure).
+func TestBuildIndex_ZeroKeywordCount_PlumbedFromHelper(t *testing.T) {
+	// Mutates HOME — cannot run in parallel.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	skillsDir := filepath.Join(tmp, ".claude", "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "good.md"), []byte(minimalSkill), 0o644); err != nil {
+		t.Fatalf("write good.md: %v", err)
+	}
+
+	idx, err := buildIndex([]string{skillsDir})
+	if err != nil {
+		t.Fatalf("buildIndex: %v", err)
+	}
+
+	// ZeroKeywordCount must equal the manual recount over idx.Entries.
+	want := countZeroKeyword(idx.Entries)
+	if idx.ZeroKeywordCount != want {
+		t.Errorf("ZeroKeywordCount mismatch: stored=%d, recount=%d", idx.ZeroKeywordCount, want)
+	}
+}
+
+func TestLoadOrRebuild_ReturnsDurationOnRebuild(t *testing.T) {
+	// Mutates HOME — cannot run in parallel.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	seedSkillFile(t, tmp, "x", minimalSkill)
+	sourceDirs := []string{filepath.Join(tmp, ".claude", "skills")}
+
+	// Fresh install forces a rebuild; duration must be > 0.
+	_, dur, err := LoadOrRebuild(sourceDirs)
+	if err != nil {
+		t.Fatalf("LoadOrRebuild: %v", err)
+	}
+	if dur <= 0 {
+		t.Errorf("expected rebuild duration > 0, got %v", dur)
+	}
+}
+
+func TestLoadOrRebuild_ReturnsZeroOnCacheLoad(t *testing.T) {
+	// Mutates HOME — cannot run in parallel.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	seedSkillFile(t, tmp, "x", minimalSkill)
+	sourceDirs := []string{filepath.Join(tmp, ".claude", "skills")}
+
+	// First call — builds and saves (duration > 0).
+	if _, _, err := LoadOrRebuild(sourceDirs); err != nil {
+		t.Fatalf("first LoadOrRebuild: %v", err)
+	}
+
+	// Second call — cache hit; duration must be exactly 0.
+	_, dur, err := LoadOrRebuild(sourceDirs)
+	if err != nil {
+		t.Fatalf("second LoadOrRebuild: %v", err)
+	}
+	if dur != 0 {
+		t.Errorf("cache hit must return duration 0, got %v", dur)
+	}
+}
+
+// TestLoadOrRebuild_SuggestedAliases_PopulatesEntries verifies that after
+// LoadOrRebuild, entries that have co-occurrence records above the threshold
+// have SuggestedAliases populated with the candidate tokens.
+func TestLoadOrRebuild_SuggestedAliases_PopulatesEntries(t *testing.T) {
+	// Mutates HOME and writes co-occurrence log — cannot run in parallel.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	// Seed a skill with a distinct keyword so it gets indexed.
+	const skillContent = `---
+name: lang-go-dev
+title: Go Development
+description: goroutine channel concurrency
+---
+
+# Go Development
+`
+	seedSkillFile(t, tmp, "lang-go-dev", skillContent)
+	sourceDirs := []string{filepath.Join(tmp, ".claude", "skills")}
+
+	// Write co-occurrence log entries above SuggestAliasThreshold (5).
+	// Pair: entry="lang-go-dev", token="concurrent" — appears 6 times.
+	coPath := filepath.Join(tmp, ".config", "claudette", "cooccurrence.log")
+	if err := os.MkdirAll(filepath.Dir(coPath), 0o755); err != nil {
+		t.Fatalf("mkdir coPath: %v", err)
+	}
+	for range 6 {
+		rec := usage.CoOccurrenceRecord{
+			Timestamp:       time.Now(),
+			UnmatchedTokens: []string{"concurrent"},
+			HitEntries:      []string{"lang-go-dev"},
+		}
+		if err := usage.AppendCoOccurrenceLog(coPath, rec); err != nil {
+			t.Fatalf("AppendCoOccurrenceLog: %v", err)
+		}
+	}
+
+	idx, _, err := LoadOrRebuild(sourceDirs)
+	if err != nil {
+		t.Fatalf("LoadOrRebuild: %v", err)
+	}
+
+	var found *Entry
+	for i := range idx.Entries {
+		if idx.Entries[i].Name == "lang-go-dev" {
+			found = &idx.Entries[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("lang-go-dev entry not found in index")
+	}
+
+	hasConcurrent := false
+	for _, sa := range found.SuggestedAliases {
+		if sa == "concurrent" {
+			hasConcurrent = true
+			break
+		}
+	}
+	if !hasConcurrent {
+		t.Errorf("SuggestedAliases: expected %q, got %v", "concurrent", found.SuggestedAliases)
 	}
 }

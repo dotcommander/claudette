@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
-func parseEntry(path, sourceDir string) (Entry, bool) {
+func parseEntry(path, sourceDir string, mtime time.Time) (Entry, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Entry{}, false
@@ -55,14 +56,15 @@ func parseEntry(path, sourceDir string) (Entry, bool) {
 	}
 
 	return Entry{
-		Type:     entryType,
-		Name:     name,
-		Title:    cmp.Or(title, name),
-		Desc:     truncateRunes(description, 200),
-		Category: category,
-		FilePath: path,
-		Keywords: keywords,
-		Bigrams:  extractBigrams(title),
+		Type:      entryType,
+		Name:      name,
+		Title:     cmp.Or(title, name),
+		Desc:      truncateRunes(description, 200),
+		Category:  category,
+		FilePath:  path,
+		FileMtime: mtime,
+		Keywords:  keywords,
+		Bigrams:   extractBigrams(title),
 	}, true
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/dotcommander/claudette/internal/search"
@@ -193,8 +194,12 @@ func writeEntryBlock(w io.Writer, label string, d search.EntryDiagnostics) {
 	if len(d.BigramHits) == 0 {
 		fmt.Fprintln(w, "      (no matches)")
 	} else {
-		for _, bg := range d.BigramHits {
-			fmt.Fprintf(w, "      %s  Δ=+3.00\n", bg)
+		for i, bg := range d.BigramHits {
+			var delta float64
+			if i < len(d.BigramDeltas) {
+				delta = d.BigramDeltas[i]
+			}
+			fmt.Fprintf(w, "      %s  Δ=%+.2f\n", bg, delta)
 		}
 	}
 	fmt.Fprintln(w)
@@ -205,12 +210,14 @@ func formatTokenList(tokens []string) string {
 	if len(tokens) == 0 {
 		return "(none)"
 	}
-	result := "["
+	var b strings.Builder
+	b.WriteByte('[')
 	for i, t := range tokens {
 		if i > 0 {
-			result += " "
+			b.WriteByte(' ')
 		}
-		result += t
+		b.WriteString(t)
 	}
-	return result + "]"
+	b.WriteByte(']')
+	return b.String()
 }

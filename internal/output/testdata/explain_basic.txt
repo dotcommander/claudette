@@ -17,7 +17,7 @@ corpus
       goroutine  alias+direct  weight=3  idf=1.00  Δ=+5.00
       leak       direct        weight=2  idf=1.00  Δ=+2.00
     bigrams:
-      goroutine leak  Δ=+3.00
+      goroutine leak  Δ=+1.50
 
 --- suppressed (not in Score output) ---
 

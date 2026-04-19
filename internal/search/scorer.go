@@ -27,6 +27,12 @@ type matchTerm struct {
 // Bigram matches bypass this gate — positional evidence is already discriminating.
 const minIDFForMatch = 1.0
 
+// bigramFloor is the minimum bonus awarded for a matched bigram.
+// Even when both tokens are common (low IDF), positional co-occurrence is real signal.
+// Set to half the old flat constant (3.0/2 = 1.5) so common pairs never score worse
+// than half the old default; rare pairs score higher via the IDF-weighted average.
+const bigramFloor = 1.5
+
 // bm25 computes the BM25 term score for a single keyword occurrence.
 // weight is the field weight (name=3, title=2, tag=2, desc=1).
 // idf is the dampened inverse document frequency multiplier.
@@ -44,17 +50,19 @@ func bm25(weight int, idf, dl, avgdl float64) float64 {
 
 // applyUsageBoost multiplies the raw score by a usage-based factor:
 //
-//	boost = 1 + log1p(hitCount) / 10
+//	boost = 1 + log1p(decayedHitCount) / 10
 //
-// Returns 1.0× when hitCount is 0 or negative. Uses math.Log1p for numerical
-// stability at small hitCount. The curve is O(log n) — 0 hits → 1.00x,
+// decayedHitCount is the time-decayed sum from AggregateDecayedHitCounts —
+// recent hits count ~1.0, hits one half-life ago count ~0.5.
+// Returns 1.0× when decayedHitCount is 0 or negative. Uses math.Log1p for
+// numerical stability near zero. The curve is O(log n) — 0 hits → 1.00x,
 // 10 → 1.24x, 100 → 1.46x, 1000 → 1.69x. No ceiling: the log function is
 // the ceiling. Applied pre-rounding so sub-unit boosts can still re-rank ties.
-func applyUsageBoost(score float64, hitCount int) float64 {
-	if hitCount <= 0 {
+func applyUsageBoost(score float64, decayedHitCount float64) float64 {
+	if decayedHitCount <= 0 {
 		return score
 	}
-	return score * (1 + math.Log1p(float64(hitCount))/10)
+	return score * (1 + math.Log1p(decayedHitCount)/10)
 }
 
 // tokenScore is the per-token result used by both the fast path and diagnostics.
@@ -77,15 +85,16 @@ type tokenScore struct {
 // Never set by the scorer itself — filled in by ScoreExplained based on the
 // same conditions Score uses.
 type EntryDiagnostics struct {
-	Entry       index.Entry `json:"entry"`
-	RawScore    float64     `json:"raw_score"`     // pre-round, post-usage-boost
-	FinalScore  int         `json:"final_score"`   // math.Round(RawScore)
-	TokenHits   []TokenHit  `json:"token_hits"`    // one per prompt token (includes misses)
-	BigramHits  []string    `json:"bigram_hits"`   // prompt bigrams that matched this entry
-	MaxIDF      float64     `json:"max_idf"`       // best per-term IDF contribution (for gate)
-	UsageBoost  float64     `json:"usage_boost"`   // multiplier applied (1.0 if hit_count=0)
-	PreBoostSum float64     `json:"pre_boost_sum"` // score before applyUsageBoost
-	Suppressed  string      `json:"suppressed,omitzero"`
+	Entry        index.Entry `json:"entry"`
+	RawScore     float64     `json:"raw_score"`     // pre-round, post-usage-boost
+	FinalScore   int         `json:"final_score"`   // math.Round(RawScore)
+	TokenHits    []TokenHit  `json:"token_hits"`    // one per prompt token (includes misses)
+	BigramHits   []string    `json:"bigram_hits"`   // prompt bigrams that matched this entry
+	BigramDeltas []float64   `json:"bigram_deltas"` // IDF-weighted bonus per matched bigram (parallel to BigramHits)
+	MaxIDF       float64     `json:"max_idf"`       // best per-term IDF contribution (for gate)
+	UsageBoost   float64     `json:"usage_boost"`   // multiplier applied (1.0 if hit_count=0)
+	PreBoostSum  float64     `json:"pre_boost_sum"` // score before applyUsageBoost
+	Suppressed   string      `json:"suppressed,omitzero"`
 }
 
 // TokenHit is one prompt token's interaction with one entry.
@@ -225,21 +234,27 @@ func scoreEntryCore(entry index.Entry, tokens []string, promptBigrams []string, 
 		})
 	}
 
-	// Bigram matching: flat +3 per matched bigram.
+	// Bigram matching: IDF-weighted average bonus, floored at bigramFloor.
+	// rare-rare pairs score higher than common-common pairs; positional evidence
+	// still earns at least bigramFloor regardless of term frequency.
 	var bigramHits []string
+	var bigramDeltas []float64
 	if len(entry.Bigrams) > 0 && len(promptBigrams) > 0 {
 		for _, pb := range promptBigrams {
 			for _, eb := range entry.Bigrams {
 				if pb == eb {
-					preBoostSum += 3.0
+					tok1, tok2, _ := strings.Cut(pb, " ")
+					bonus := math.Max(bigramFloor, (idfMul(idf, tok1)+idfMul(idf, tok2))/2)
+					preBoostSum += bonus
 					bigramHits = append(bigramHits, pb)
+					bigramDeltas = append(bigramDeltas, bonus)
 					break // each prompt bigram counts once
 				}
 			}
 		}
 	}
 
-	rawScore := applyUsageBoost(preBoostSum, entry.HitCount)
+	rawScore := applyUsageBoost(preBoostSum, entry.HitCountDecayed)
 	var usageBoost float64
 	if preBoostSum == 0 {
 		usageBoost = 1.0
@@ -248,14 +263,15 @@ func scoreEntryCore(entry index.Entry, tokens []string, promptBigrams []string, 
 	}
 
 	return EntryDiagnostics{
-		Entry:       entry,
-		RawScore:    rawScore,
-		FinalScore:  int(math.Round(rawScore)),
-		TokenHits:   hits,
-		BigramHits:  bigramHits,
-		MaxIDF:      maxIDF,
-		UsageBoost:  usageBoost,
-		PreBoostSum: preBoostSum,
+		Entry:        entry,
+		RawScore:     rawScore,
+		FinalScore:   int(math.Round(rawScore)),
+		TokenHits:    hits,
+		BigramHits:   bigramHits,
+		BigramDeltas: bigramDeltas,
+		MaxIDF:       maxIDF,
+		UsageBoost:   usageBoost,
+		PreBoostSum:  preBoostSum,
 	}
 }
 
@@ -270,14 +286,18 @@ func scoreEntry(entry index.Entry, tokens []string, promptBigrams []string, idf 
 			terms = append(terms, matchTerm{term: h.Token, delta: h.Delta})
 		}
 	}
-	for _, bg := range d.BigramHits {
-		terms = append(terms, matchTerm{term: bg, delta: 3.0})
+	for i, bg := range d.BigramHits {
+		terms = append(terms, matchTerm{term: bg, delta: d.BigramDeltas[i]})
 	}
 	return d.RawScore, terms, len(d.BigramHits) > 0, d.MaxIDF
 }
 
 // scoreToken returns the score contribution and what kind of match fired.
 // dl is the document length (len(entry.Keywords)); avgdl is the corpus average.
+//
+// Matching order: category alias → Keywords (direct, plural, stem) → SuggestedAliases.
+// SuggestedAliases use weight=1 and no double-count: a token matched by Keywords
+// is never re-scored via SuggestedAliases.
 func scoreToken(entry index.Entry, tok string, idf map[string]float64, dl, avgdl float64) tokenScore {
 	mul := idfMul(idf, tok)
 	var delta float64
@@ -331,6 +351,23 @@ func scoreToken(entry index.Entry, tok string, idf map[string]float64, dl, avgdl
 				}
 				return tokenScore{Delta: delta + bm25(weight, mul, dl, avgdl)*0.6, Kind: kindStr, Weight: weight, AliasCat: aliasCat}
 			}
+		}
+	}
+
+	// SuggestedAlias match: weight=1, BM25, no double-count (Keywords already returned above).
+	// Plural normalization also applies to suggested aliases.
+	for _, sa := range entry.SuggestedAliases {
+		matched := sa == tok
+		if !matched {
+			// plural: "foo" matches "foos" and vice versa
+			matched = sa == tok+"s" || sa+"s" == tok
+		}
+		if matched {
+			kindStr := strings.Join(append(kindParts, "suggested"), "+")
+			if len(kindParts) == 0 {
+				kindStr = "suggested"
+			}
+			return tokenScore{Delta: delta + bm25(1, mul, dl, avgdl), Kind: kindStr, Weight: 1, AliasCat: aliasCat}
 		}
 	}
 

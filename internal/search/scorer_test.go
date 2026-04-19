@@ -168,9 +168,12 @@ func TestScore(t *testing.T) {
 			wantScore: 2, // round(3 * 0.6 * 1.0) = round(1.8) = 2
 		},
 		{
-			// Case 8: bigram +3 flat bonus — tokens ["race","condition"] build bigram
-			// "race condition" which matches entry bigram.
-			name: "bigram flat +3 bonus",
+			// Case 8: bigram IDF-weighted bonus (floor=1.5) — tokens ["race","condition"]
+			// build bigram "race condition" which matches entry bigram.
+			// With nil IDF, idfMul returns 1.0 for all tokens, so:
+			//   bonus = max(1.5, (1.0+1.0)/2) = max(1.5, 1.0) = 1.5
+			//   score = race(1) + condition(1) + bigram(1.5) = 3.5 → rounds to 4
+			name: "bigram IDF-weighted bonus floor",
 			entries: []index.Entry{
 				makeEntry("race-entry", "Race Condition Detection", "go",
 					map[string]int{"race": 1, "condition": 1},
@@ -183,9 +186,8 @@ func TestScore(t *testing.T) {
 			idf:       nilIDF,
 			wantNil:   false,
 			wantCount: 1, // "other" has keyword "pipe" not in tokens → score=0, filtered
-			// race-entry: race(1) + condition(1) + bigram(3) = 5
 			wantFirst: "race-entry",
-			wantScore: 5,
+			wantScore: 4,
 		},
 		{
 			// Case 9: below threshold excluded — threshold=10, no entry can score that high.
@@ -556,7 +558,7 @@ func TestApplyUsageBoost(t *testing.T) {
 	tests := []struct {
 		name     string
 		score    float64
-		hitCount int
+		hitCount float64
 		want     float64
 	}{
 		{name: "zero hits returns score unchanged", score: 10.0, hitCount: 0, want: 10.0},
@@ -573,7 +575,7 @@ func TestApplyUsageBoost(t *testing.T) {
 			t.Parallel()
 			got := applyUsageBoost(tc.score, tc.hitCount)
 			if diff := got - tc.want; diff > epsilon || diff < -epsilon {
-				t.Errorf("applyUsageBoost(%v, %d) = %v, want ~%v (±%v)",
+				t.Errorf("applyUsageBoost(%v, %v) = %v, want ~%v (±%v)",
 					tc.score, tc.hitCount, got, tc.want, epsilon)
 			}
 		})
@@ -586,16 +588,16 @@ func TestScore_UsageBoostReRanks(t *testing.T) {
 	t.Parallel()
 
 	// Two entries with identical raw scoring: both match "goroutine" weight 3.
-	// Entry "popular" has HitCount=100 → boost ~1.462 → raw 3 × 1.462 = 4.386 → rounds to 4.
-	// Entry "unused"  has HitCount=0   → boost 1.0      → raw 3 × 1.0   = 3.000 → rounds to 3.
+	// Entry "popular" has HitCountDecayed=100 → boost ~1.462 → raw 3 × 1.462 = 4.386 → rounds to 4.
+	// Entry "unused"  has HitCountDecayed=0   → boost 1.0     → raw 3 × 1.0   = 3.000 → rounds to 3.
 	// "popular" MUST sort before "unused".
 	popular := makeEntry("popular", "Popular Entry", "go",
 		map[string]int{"goroutine": 3}, nil)
-	popular.HitCount = 100
+	popular.HitCountDecayed = 100
 
 	unused := makeEntry("unused", "Unused Entry", "go",
 		map[string]int{"goroutine": 3}, nil)
-	// HitCount left at zero value.
+	// HitCountDecayed left at zero value.
 
 	// Order the input deliberately with "unused" first so a passing test proves
 	// the re-rank is caused by the boost, not input order.
@@ -639,5 +641,252 @@ func TestScore_UsageBoostZeroHitIsIdentity(t *testing.T) {
 	if results[0].Score != 3 {
 		t.Errorf("zero-HitCount entry scored %d, want 3 (pre-boost behavior must be preserved)",
 			results[0].Score)
+	}
+}
+
+// TestBigramBonus_BothLowIDF_HigherScore verifies that a bigram whose both tokens are
+// rare (high IDF) earns a higher bonus than a bigram whose both tokens are common (low IDF).
+// The IDF-weighted average formula: bonus = max(bigramFloor, (idf1+idf2)/2)
+func TestBigramBonus_BothLowIDF_HigherScore(t *testing.T) {
+	t.Parallel()
+
+	// Build a corpus: "errgroup" and "context" appear in only 1 of 6 entries → rare → high IDF.
+	// "code" and "debug" appear in all 6 entries → common → low IDF.
+	//
+	// rare-entry has bigram "errgroup context"; common-entry has bigram "code debug".
+	// Both have the same keyword weights, so the bigram bonus is the discriminating factor.
+	rareEntry := makeEntry("rare-entry", "Errgroup Context Usage", "go",
+		map[string]int{"errgroup": 2, "context": 2},
+		[]string{"errgroup context"})
+	commonEntry := makeEntry("common-entry", "Code Debug Guide", "go",
+		map[string]int{"code": 2, "debug": 2},
+		[]string{"code debug"})
+	// Filler entries that make "code" and "debug" high-df (appear in all).
+	filler := func(n string) index.Entry {
+		return makeEntry(n, "Filler", "bash",
+			map[string]int{"code": 1, "debug": 1}, nil)
+	}
+	entries := []index.Entry{
+		rareEntry, commonEntry,
+		filler("f1"), filler("f2"), filler("f3"), filler("f4"),
+	}
+
+	idf := index.ComputeIDF(entries)
+
+	// Score rare-entry against "errgroup context"
+	rareResults := Score([]index.Entry{rareEntry}, []string{"errgroup", "context"}, 1, idf, 0)
+	// Score common-entry against "code debug"
+	commonResults := Score([]index.Entry{commonEntry}, []string{"code", "debug"}, 1, idf, 0)
+
+	if len(rareResults) != 1 {
+		t.Fatalf("rare-entry: expected 1 result, got %d", len(rareResults))
+	}
+	if len(commonResults) != 1 {
+		t.Fatalf("common-entry: expected 1 result, got %d", len(commonResults))
+	}
+
+	rareScore := rareResults[0].Score
+	commonScore := commonResults[0].Score
+	if rareScore <= commonScore {
+		t.Errorf("rare-pair score (%d) should be > common-pair score (%d); errgroup+context are rare, code+debug are ubiquitous",
+			rareScore, commonScore)
+	}
+}
+
+// TestBigramBonus_BothHighIDF_AtOrNearFloor verifies that a bigram where both tokens
+// are extremely common (IDF near 0) still awards at least bigramFloor (1.5).
+func TestBigramBonus_BothHighIDF_AtOrNearFloor(t *testing.T) {
+	t.Parallel()
+
+	// "the" and "code" appear in every entry → near-zero IDF. The bigram should
+	// still yield at least bigramFloor contribution to the score.
+	entries := make([]index.Entry, 10)
+	for i := range 10 {
+		entries[i] = makeEntry(
+			"e"+string(rune('a'+i)), "Entry", "go",
+			map[string]int{"the": 1, "code": 1}, nil,
+		)
+	}
+	// Target has the bigram registered.
+	target := makeEntry("target", "The Code Guide", "go",
+		map[string]int{"the": 1, "code": 1},
+		[]string{"the code"})
+	entries[0] = target
+
+	idf := index.ComputeIDF(entries)
+
+	// Compute what idfMul returns for "the" and "code" with this corpus.
+	idfThe := idfMulExported(idf, "the")
+	idfCode := idfMulExported(idf, "code")
+	expectedFloor := 1.5 // bigramFloor constant
+	avgIDF := (idfThe + idfCode) / 2
+
+	results := Score([]index.Entry{target}, []string{"the", "code"}, 1, idf, 0)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	// The bigram bonus must be at least bigramFloor regardless of how low the IDF is.
+	// With weight=1 per token, pre-bigram score = idfThe + idfCode (approx 0).
+	// bigramBonus ≥ bigramFloor → total pre-boost ≥ bigramFloor.
+	// We verify floor by checking: if avgIDF < bigramFloor, score must still be >= 1.
+	if avgIDF < expectedFloor {
+		// Common case: IDF average is below floor, floor kicks in.
+		// Score must be round(preBoost + bigramFloor) ≥ round(bigramFloor) = 2.
+		if results[0].Score < 2 {
+			t.Errorf("floor not applied: score=%d, avgIDF=%f < floor=%f; expected score >= 2",
+				results[0].Score, avgIDF, expectedFloor)
+		}
+	}
+	// Invariant: bonus is never negative.
+	if results[0].Score < 0 {
+		t.Errorf("negative score %d — bigram bonus must be non-negative", results[0].Score)
+	}
+}
+
+// TestBigramBonus_MixedIDF_BetweenFloorAndHigh verifies that a bigram with one rare
+// token and one common token scores between the floor (both-common) and the high
+// (both-rare) cases.
+func TestBigramBonus_MixedIDF_BetweenFloorAndHigh(t *testing.T) {
+	t.Parallel()
+
+	// "errgroup" and "context" appear in only 1 of 8 entries → rare → high IDF.
+	// "code" and "debug" appear in all 8 entries → common → low IDF.
+	// "errgroup code" is mixed: one rare + one common.
+	//
+	// Filler populates "code" and "debug" across the corpus so both have low IDF.
+	filler := func(n string) index.Entry {
+		return makeEntry(n, "Filler", "bash", map[string]int{"code": 1, "debug": 1}, nil)
+	}
+	rareEntry := makeEntry("rare-entry", "Errgroup Context", "go",
+		map[string]int{"errgroup": 2, "context": 2},
+		[]string{"errgroup context"})
+	mixedEntry := makeEntry("mixed-entry", "Errgroup Code", "go",
+		map[string]int{"errgroup": 2, "code": 2},
+		[]string{"errgroup code"})
+	commonEntry := makeEntry("common-entry", "Code Debug", "go",
+		map[string]int{"code": 2, "debug": 2},
+		[]string{"code debug"})
+
+	entries := []index.Entry{
+		rareEntry, mixedEntry, commonEntry,
+		filler("f1"), filler("f2"), filler("f3"), filler("f4"), filler("f5"),
+	}
+	idf := index.ComputeIDF(entries)
+
+	// Score each against its own matching bigram.
+	rareResults := Score([]index.Entry{rareEntry}, []string{"errgroup", "context"}, 1, idf, 0)
+	mixedResults := Score([]index.Entry{mixedEntry}, []string{"errgroup", "code"}, 1, idf, 0)
+	commonResults := Score([]index.Entry{commonEntry}, []string{"code", "debug"}, 1, idf, 0)
+
+	if len(rareResults) != 1 || len(mixedResults) != 1 || len(commonResults) != 1 {
+		t.Fatalf("expected 1 result each; rare=%d mixed=%d common=%d",
+			len(rareResults), len(mixedResults), len(commonResults))
+	}
+
+	rareScore := rareResults[0].Score
+	mixedScore := mixedResults[0].Score
+	commonScore := commonResults[0].Score
+
+	// Ordering invariant: rare >= mixed >= common (may be equal at floor).
+	if rareScore < mixedScore {
+		t.Errorf("rare-pair score (%d) should be >= mixed-pair score (%d)", rareScore, mixedScore)
+	}
+	if mixedScore < commonScore {
+		t.Errorf("mixed-pair score (%d) should be >= common-pair score (%d)", mixedScore, commonScore)
+	}
+}
+
+// idfMulExported is a test-local wrapper to access the package-private idfMul function.
+func idfMulExported(idf map[string]float64, token string) float64 {
+	return idfMul(idf, token)
+}
+
+// --- SuggestedAliases scorer tests ---
+
+// makeSuggestedEntry builds an Entry with only SuggestedAliases set (empty Keywords).
+func makeSuggestedEntry(name, title, category string, suggestedAliases []string) index.Entry {
+	return index.Entry{
+		Type:             index.TypeSkill,
+		Name:             name,
+		Title:            title,
+		Category:         category,
+		Keywords:         map[string]int{},
+		SuggestedAliases: suggestedAliases,
+	}
+}
+
+// TestScore_SuggestedAlias_ScoresEntry verifies that an entry with a matching
+// SuggestedAlias token but empty Keywords scores above zero.
+func TestScore_SuggestedAlias_ScoresEntry(t *testing.T) {
+	t.Parallel()
+
+	entry := makeSuggestedEntry("lang-go-dev", "Go Development", "go", []string{"foo"})
+
+	// Score against "foo" with threshold=1 and no IDF (nil).
+	results := Score([]index.Entry{entry}, []string{"foo"}, 1, nil, 0)
+	if len(results) == 0 {
+		t.Fatal("expected SuggestedAlias match to produce a result, got none")
+	}
+	if results[0].Score <= 0 {
+		t.Errorf("SuggestedAlias match: score should be > 0, got %d", results[0].Score)
+	}
+}
+
+// TestScore_SuggestedAlias_NoDoubleCount verifies that a token matching both
+// Keywords and SuggestedAliases is only scored once via Keywords (higher weight).
+func TestScore_SuggestedAlias_NoDoubleCount(t *testing.T) {
+	t.Parallel()
+
+	// Entry with "foo" in both Keywords (weight=2) and SuggestedAliases.
+	entryBoth := index.Entry{
+		Type:             index.TypeSkill,
+		Name:             "both",
+		Title:            "Both",
+		Category:         "go",
+		Keywords:         map[string]int{"foo": 2},
+		SuggestedAliases: []string{"foo"},
+	}
+	// Entry with "foo" in Keywords only (weight=2) — must produce identical score.
+	entryKwOnly := index.Entry{
+		Type:     index.TypeSkill,
+		Name:     "kw-only",
+		Title:    "KW Only",
+		Category: "go",
+		Keywords: map[string]int{"foo": 2},
+	}
+
+	resultsBoth := Score([]index.Entry{entryBoth}, []string{"foo"}, 1, nil, 0)
+	resultsKwOnly := Score([]index.Entry{entryKwOnly}, []string{"foo"}, 1, nil, 0)
+
+	if len(resultsBoth) == 0 || len(resultsKwOnly) == 0 {
+		t.Fatal("expected results for both entries")
+	}
+	if resultsBoth[0].Score != resultsKwOnly[0].Score {
+		t.Errorf("double-count detected: both=%d kw-only=%d (should be equal)",
+			resultsBoth[0].Score, resultsKwOnly[0].Score)
+	}
+}
+
+// TestScore_GenericPrompt_NoFortressMatch is the regression test for Item C:
+// a generic prompt containing only low-signal nouns must not score above threshold.
+// Mirrors the real-world case where "public product" surfaced fe-ui-svelte.
+func TestScore_GenericPrompt_NoFortressMatch(t *testing.T) {
+	t.Parallel()
+
+	// Simulate the Fortress Architecture skill with "public" and "product" keywords.
+	fortressEntry := makeEntry("fe-ui-svelte", "Fortress Architecture", "svelte",
+		map[string]int{"fortress": 3, "architecture": 2, "public": 2, "product": 2}, nil)
+
+	stops := DefaultStopWords()
+	// "we would like this product to be public" — after stop-word filtering,
+	// "product" and "public" are both removed, leaving no discriminating tokens.
+	tokens := Tokenize("we would like this product to be public", stops)
+
+	// Score against the fortress entry; result must be empty (threshold=2).
+	results := Score([]index.Entry{fortressEntry}, tokens, 2, nil, 0)
+	if len(results) > 0 {
+		t.Errorf("generic prompt should produce zero matches above threshold 2; got %d result(s): %v",
+			len(results), results)
 	}
 }

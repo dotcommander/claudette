@@ -3,6 +3,7 @@ package index
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 const aliasFixture = `---
@@ -52,7 +53,7 @@ func TestParseEntry_AliasTokensInKeywords(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	entry, ok := parseEntry(path, dir)
+	entry, ok := parseEntry(path, dir, time.Time{})
 	if !ok {
 		t.Fatal("parseEntry returned ok=false")
 	}

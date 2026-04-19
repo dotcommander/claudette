@@ -103,6 +103,7 @@ for i in "${!PROMPTS[@]}"; do
     [[ "$stderr_line" =~ claudette:\ \[([^]]*)\]\ -\> ]] && tokens="${BASH_REMATCH[1]}"
     results_part="${stderr_line#* -> }"
     results_part="${results_part% \(*ms\)}"
+    results_part="${results_part%% |*}"  # strip advisory segment if present
     IFS=',' read -ra result_items <<< "$results_part"
     num_results="${#result_items[@]}"
     for item in "${result_items[@]}"; do

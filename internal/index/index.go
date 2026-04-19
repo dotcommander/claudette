@@ -13,18 +13,22 @@ import (
 )
 
 // CurrentVersion is the index schema version; bump when Entry shape changes.
-const CurrentVersion = 4
+const CurrentVersion = 9
 
 // Index is the on-disk cache of all scanned entries.
 type Index struct {
-	Version      int                `json:"version"`
-	BuildTime    time.Time          `json:"build_time"`
-	SourceMtime  time.Time          `json:"source_mtime"`
-	FileCount    int                `json:"file_count"`
-	AliasesMtime time.Time          `json:"aliases_mtime,omitzero"` // mtime of aliases.yaml at build time (zero if absent)
-	Entries      []Entry            `json:"entries"`
-	IDF          map[string]float64 `json:"idf,omitzero"`  // inverse document frequency per keyword
-	AvgFieldLen  float64            `json:"avg_field_len"` // average number of keywords per entry (for BM25)
+	Version             int                `json:"version"`
+	BuildTime           time.Time          `json:"build_time"`
+	SourceMtime         time.Time          `json:"source_mtime"`
+	FileCount           int                `json:"file_count"`
+	AliasesMtime        time.Time          `json:"aliases_mtime,omitzero"`         // mtime of aliases.yaml at build time (zero if absent)
+	ZeroKeywordCount    int                `json:"zero_keyword_count,omitzero"`    // entries with no keywords after parse (authoring signal)
+	ColdEntryCount      int                `json:"cold_entry_count,omitzero"`      // entries never hit, >90d old, not brand-new (>7d old)
+	FrequentMissTokens  []string           `json:"frequent_miss_tokens,omitempty"` // top missed tokens above threshold; empty when below
+	SuggestedAliasCount int                `json:"suggested_alias_count,omitzero"` // entries with alias candidates pending review
+	Entries             []Entry            `json:"entries"`
+	IDF                 map[string]float64 `json:"idf,omitzero"`  // inverse document frequency per keyword
+	AvgFieldLen         float64            `json:"avg_field_len"` // average number of keywords per entry (for BM25)
 }
 
 // IndexPath returns ~/.config/claudette/index.json.
@@ -81,15 +85,18 @@ func buildIndex(sourceDirs []string) (Index, error) {
 	}
 	applyAliasOverrides(scan.Entries, overrides)
 
+	now := time.Now()
 	return Index{
-		Version:      CurrentVersion,
-		BuildTime:    time.Now(),
-		SourceMtime:  scan.MaxMtime,
-		FileCount:    scan.FileCount,
-		AliasesMtime: aliasesMtime,
-		Entries:      scan.Entries,
-		IDF:          ComputeIDF(scan.Entries),
-		AvgFieldLen:  ComputeAvgFieldLen(scan.Entries),
+		Version:          CurrentVersion,
+		BuildTime:        now,
+		SourceMtime:      scan.MaxMtime,
+		FileCount:        scan.FileCount,
+		AliasesMtime:     aliasesMtime,
+		ZeroKeywordCount: countZeroKeyword(scan.Entries),
+		ColdEntryCount:   countColdEntries(scan.Entries, now),
+		Entries:          scan.Entries,
+		IDF:              ComputeIDF(scan.Entries),
+		AvgFieldLen:      ComputeAvgFieldLen(scan.Entries),
 	}, nil
 }
 
@@ -143,6 +150,40 @@ func NeedsRebuild(cached Index, sourceDirs []string) bool {
 	return !currentAliasesMtime.Equal(cached.AliasesMtime)
 }
 
+// countZeroKeyword returns the number of entries that have no keywords after
+// parsing. A non-zero count is an authoring signal (frontmatter parse failure
+// or empty-body file). Precomputed once at build time; advisory path reads it.
+func countZeroKeyword(entries []Entry) int {
+	n := 0
+	for _, e := range entries {
+		if len(e.Keywords) == 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// coldEntryMinAge is the minimum file age for a cold-entry advisory.
+// coldEntryGrace is the grace period for newly added entries.
+const (
+	coldEntryMinAge = 90 * 24 * time.Hour
+	coldEntryGrace  = 7 * 24 * time.Hour
+)
+
+// countColdEntries returns the number of entries that have never been hit
+// (HitCount == 0), are older than coldEntryMinAge (not freshly added),
+// and are newer than coldEntryGrace (not brand-new). Dynamic: depends on now.
+func countColdEntries(entries []Entry, now time.Time) int {
+	n := 0
+	for _, e := range entries {
+		age := now.Sub(e.FileMtime)
+		if e.HitCount == 0 && age > coldEntryMinAge && age > coldEntryGrace {
+			n++
+		}
+	}
+	return n
+}
+
 // ComputeAvgFieldLen returns the average number of keywords per entry.
 // Used as the avgdl denominator in BM25 length normalization.
 func ComputeAvgFieldLen(entries []Entry) float64 {
@@ -181,32 +222,84 @@ func ComputeIDF(entries []Entry) map[string]float64 {
 }
 
 // LoadOrRebuild loads the index and rebuilds it if stale.
-func LoadOrRebuild(sourceDirs []string) (Index, error) {
+// Returns the elapsed rebuild duration when a rebuild happened; 0 on cache hit.
+func LoadOrRebuild(sourceDirs []string) (Index, time.Duration, error) {
 	cached, err := Load()
 	if err == nil && !NeedsRebuild(cached, sourceDirs) {
-		return cached, nil
+		return cached, 0, nil
 	}
 
-	// Missing, corrupt, or stale — rebuild.
+	// Missing, corrupt, or stale — rebuild. Timing starts here, not at Load,
+	// so we measure only the actual rebuild work.
+	rebuildStart := time.Now()
 	idx, err := buildIndex(sourceDirs)
 	if err != nil {
-		return Index{}, err
+		return Index{}, 0, err
 	}
 
-	// Compact usage log into entry hit counts.
+	now := time.Now()
+	cutoff := now.Add(-usage.DefaultUsageLogTTL)
+
+	// Compact usage log into entry hit counts (raw for diagnostics, decayed for scoring).
+	// Drop records older than DefaultUsageLogTTL to bound on-disk log growth.
 	records, logErr := usage.ParseUsageLog()
 	if logErr == nil && len(records) > 0 {
-		counts := usage.AggregateHitCounts(records)
+		rawCounts := usage.AggregateHitCounts(records, cutoff)
+		decayedCounts := usage.AggregateDecayedHitCounts(records, now, usage.DefaultHalfLife, cutoff)
 		for i := range idx.Entries {
-			if c, ok := counts[idx.Entries[i].Name]; ok {
+			name := idx.Entries[i].Name
+			if c, ok := rawCounts[name]; ok {
 				idx.Entries[i].HitCount = c
+			}
+			if c, ok := decayedCounts[name]; ok {
+				idx.Entries[i].HitCountDecayed = c
+			}
+		}
+		// Recompute ColdEntryCount now that HitCount values are accurate.
+		idx.ColdEntryCount = countColdEntries(idx.Entries, now)
+	}
+
+	// Aggregate miss log: compact old records, then compute frequent missed tokens.
+	// Best-effort — miss recording failure must never block the hook.
+	_ = usage.TruncateMissLog(cutoff)
+	missRecords, _ := usage.ParseMissLog()
+	idx.FrequentMissTokens = usage.ComputeFrequentMissTokens(
+		missRecords, now, cutoff,
+		usage.MissClusterThreshold, usage.TopNMissTokens,
+	)
+
+	// Co-occurrence pipeline: compact old records, compute alias candidates, write advisory file.
+	// Best-effort — failures must never block the hook.
+	coPath, coPathErr := usage.CoOccurrenceLogPath()
+	suggestionsPath, suggestionsPathErr := config.ConfigFilePath("suggested-aliases.yaml")
+	if coPathErr == nil && suggestionsPathErr == nil {
+		_ = usage.TruncateCoOccurrenceLog(coPath, cutoff)
+		coRecords, _ := usage.ParseCoOccurrenceLog(coPath)
+		suppressSet := buildSuggestionSuppressSet(idx.Entries)
+		suggestions := usage.ComputeSuggestedAliases(coRecords, suppressSet)
+		_ = usage.WriteSuggestedAliases(suggestionsPath, suggestions)
+		idx.SuggestedAliasCount = len(suggestions)
+
+		// Populate SuggestedAliases on each entry so the scorer can consume them.
+		// Build entry-name → []token map from the computed suggestions.
+		sugMap := make(map[string][]string, len(suggestions))
+		for _, s := range suggestions {
+			tokens := make([]string, len(s.Candidates))
+			for i, c := range s.Candidates {
+				tokens[i] = c.Token
+			}
+			sugMap[s.Entry] = tokens
+		}
+		for i := range idx.Entries {
+			if toks, ok := sugMap[idx.Entries[i].Name]; ok {
+				idx.Entries[i].SuggestedAliases = toks
 			}
 		}
 	}
 
-	// Best-effort save; failing to persist doesn't block usage.
+	// Best-effort save; compact the usage log to only survivors within the TTL window.
 	if saveErr := Save(idx); saveErr == nil && logErr == nil && len(records) > 0 {
-		_ = usage.TruncateUsageLog()
+		_ = usage.TruncateUsageLog(cutoff)
 	}
-	return idx, nil
+	return idx, time.Since(rebuildStart), nil
 }

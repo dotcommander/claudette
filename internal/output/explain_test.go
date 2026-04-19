@@ -40,8 +40,9 @@ func fixedReport() ExplainReport {
 					{Token: "goroutine", Kind: "alias+direct", Weight: 3, IDF: 1.0, Delta: 5.0, AliasCat: "go"},
 					{Token: "leak", Kind: "direct", Weight: 2, IDF: 1.0, Delta: 2.0},
 				},
-				BigramHits: []string{"goroutine leak"},
-				Suppressed: "",
+				BigramHits:   []string{"goroutine leak"},
+				BigramDeltas: []float64{1.5}, // max(bigramFloor=1.5, (idf1+idf2)/2) with nil IDF → 1.0 avg → floor wins
+				Suppressed:   "",
 			},
 			{
 				Entry: index.Entry{

@@ -57,10 +57,11 @@ func TestTokenize_RegressionPlainPrompt(t *testing.T) {
 	t.Parallel()
 
 	stops := DefaultStopWords()
-	// Plain prompt with no paths or tags: verify non-stopwords survive and stopwords are absent.
+	// "without" is a negation marker — it negates "paths" and is itself consumed.
+	// "or" is a stop word. Surviving tokens: "plain", "prompt", "tags".
 	tokens := Tokenize("plain prompt without paths or tags", stops)
 
-	expected := []string{"plain", "prompt", "without", "paths", "tags"}
+	expected := []string{"plain", "prompt", "tags"}
 	for _, e := range expected {
 		if stops.Contains(e) {
 			continue
@@ -72,6 +73,14 @@ func TestTokenize_RegressionPlainPrompt(t *testing.T) {
 	// "or" is a stopword — must not appear.
 	if slices.Contains(tokens, "or") {
 		t.Errorf("Tokenize: stopword %q should be absent, got tokens=%v", "or", tokens)
+	}
+	// "without" is a negation marker — consumed, must not appear.
+	if slices.Contains(tokens, "without") {
+		t.Errorf("Tokenize: negation marker %q should not appear in output, got tokens=%v", "without", tokens)
+	}
+	// "paths" is negated by "without" — must not appear.
+	if slices.Contains(tokens, "paths") {
+		t.Errorf("Tokenize: negated token %q should be absent, got tokens=%v", "paths", tokens)
 	}
 }
 
@@ -136,5 +145,97 @@ func TestTokenize_Deduplication(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("Tokenize: expected %q exactly once after dedup, got count=%d tokens=%v", "test", count, tokens)
+	}
+}
+
+// --- Negation tests ---
+
+func TestTokenize_NegationDropsFollowingToken(t *testing.T) {
+	t.Parallel()
+
+	stops := DefaultStopWords()
+	// "not rust" — "rust" must be dropped; nothing else should be affected.
+	tokens := Tokenize("not rust", stops)
+
+	if slices.Contains(tokens, "rust") {
+		t.Errorf("Tokenize: negated token %q should be absent, got tokens=%v", "rust", tokens)
+	}
+}
+
+func TestTokenize_NegationJumpsStopWord(t *testing.T) {
+	t.Parallel()
+
+	stops := DefaultStopWords()
+	// "not a rust goroutine" — "a" is a stop word between the marker and "rust".
+	// Negation must jump the stop word and negate "rust". "goroutine" survives.
+	// (Updated from "project" which is now a stop word.)
+	tokens := Tokenize("not a rust goroutine", stops)
+
+	if slices.Contains(tokens, "rust") {
+		t.Errorf("Tokenize: negated token %q should be absent after stop-word jump, got tokens=%v", "rust", tokens)
+	}
+	if !slices.Contains(tokens, "goroutine") {
+		t.Errorf("Tokenize: non-negated token %q should be present, got tokens=%v", "goroutine", tokens)
+	}
+}
+
+func TestTokenize_NoNegation_Unchanged(t *testing.T) {
+	t.Parallel()
+
+	stops := DefaultStopWords()
+	// No negation marker present — both tokens must survive (regression guard).
+	// (Updated from "rust project" since "project" is now a stop word.)
+	tokens := Tokenize("rust goroutine", stops)
+
+	if !slices.Contains(tokens, "rust") {
+		t.Errorf("Tokenize: expected %q without negation, got tokens=%v", "rust", tokens)
+	}
+	if !slices.Contains(tokens, "goroutine") {
+		t.Errorf("Tokenize: expected %q without negation, got tokens=%v", "goroutine", tokens)
+	}
+}
+
+func TestTokenize_CrossLanguageBleed(t *testing.T) {
+	t.Parallel()
+
+	stops := DefaultStopWords()
+	// Full prompt: "I'm NOT using Rust, I'm using Go" — "rust" must be absent,
+	// "go" must be present (prevents cross-language alias bleed).
+	// "using" is a stop word, transparent to the negation — "not" skips it
+	// and negates "rust" directly.
+	tokens := Tokenize("I'm NOT using Rust, I'm using Go", stops)
+
+	if slices.Contains(tokens, "rust") {
+		t.Errorf("Tokenize: negated language %q should be absent, got tokens=%v", "rust", tokens)
+	}
+	if !slices.Contains(tokens, "go") {
+		t.Errorf("Tokenize: non-negated language %q should be present, got tokens=%v", "go", tokens)
+	}
+}
+
+func TestTokenize_NegationAtStart(t *testing.T) {
+	t.Parallel()
+
+	stops := DefaultStopWords()
+	// Negation marker at the very start of input — must still work.
+	tokens := Tokenize("not rust", stops)
+
+	if slices.Contains(tokens, "rust") {
+		t.Errorf("Tokenize: negation at start: %q should be absent, got tokens=%v", "rust", tokens)
+	}
+}
+
+func TestTokenize_DoubleNegation_Ignored(t *testing.T) {
+	t.Parallel()
+
+	stops := DefaultStopWords()
+	// "not not rust": both "not" tokens are markers; each sets pendingNegation=true.
+	// The second marker resets the flag before any content token is consumed,
+	// then "rust" becomes the target of the second negation.
+	// Documented behavior: "rust" is absent regardless of double negation.
+	tokens := Tokenize("not not rust", stops)
+
+	if slices.Contains(tokens, "rust") {
+		t.Errorf("Tokenize: double negation: %q should still be absent, got tokens=%v", "rust", tokens)
 	}
 }

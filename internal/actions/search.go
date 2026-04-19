@@ -74,7 +74,8 @@ func LoadIndex() (index.Index, error) {
 	if err != nil {
 		return index.Index{}, fmt.Errorf("discovering sources: %w", err)
 	}
-	return index.LoadOrRebuild(sourceDirs)
+	idx, _, err := index.LoadOrRebuild(sourceDirs)
+	return idx, err
 }
 
 // RebuildIndex forces a full rescan and saves the index.
