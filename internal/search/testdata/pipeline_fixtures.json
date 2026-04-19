@@ -1,0 +1,66 @@
+{
+  "fixtures": [
+    {
+      "name": "alias_boost_golang_concurrency",
+      "prompt": "golang concurrency patterns",
+      "expected_surviving": [
+        {
+          "name": "go-concurrency",
+          "matched": [
+            "concurrency",
+            "golang"
+          ]
+        }
+      ],
+      "expected_suppression": "differential"
+    },
+    {
+      "name": "clear_multi_token_match",
+      "prompt": "goleak leak detection",
+      "expected_surviving": [
+        {
+          "name": "goroutine-leak-detection",
+          "matched": [
+            "leak",
+            "detection",
+            "goleak"
+          ]
+        }
+      ],
+      "expected_suppression": ""
+    },
+    {
+      "name": "differential_gap",
+      "prompt": "goroutine channel",
+      "expected_surviving": [
+        {
+          "name": "go-channels",
+          "matched": [
+            "goroutine",
+            "channel",
+            "goroutine channel"
+          ]
+        }
+      ],
+      "expected_suppression": "differential"
+    },
+    {
+      "name": "low_confidence_vampire_joke",
+      "prompt": "tell me a vampire joke",
+      "expected_surviving": [],
+      "expected_suppression": "low-confidence"
+    },
+    {
+      "name": "no_threshold_match",
+      "prompt": "rainbow unicorn sparkle",
+      "expected_surviving": [],
+      "expected_suppression": ""
+    },
+    {
+      "name": "single_token_floor_golang",
+      "prompt": "golang",
+      "expected_surviving": [],
+      "expected_suppression": "single-token-floor"
+    }
+  ]
+}
