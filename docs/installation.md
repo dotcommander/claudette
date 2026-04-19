@@ -57,6 +57,8 @@ echo '{"prompt":"fix goroutine race condition"}' | claudette hook
 
 Expected stderr: `claudette: [goroutine race condition] -> entry1(5), entry2(4) (12ms)`
 
+When claudette has advisory signals to surface (e.g. stale index, zero-keyword entries), an optional ` | key=val ...` segment appears between the result list and the `(NNms)` suffix; when no signals are active the line is identical to the example above.
+
 ```bash
 # Slash commands are skipped — no stdout, just a skip log on stderr
 echo '{"prompt":"/commit"}' | claudette hook
