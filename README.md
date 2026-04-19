@@ -35,7 +35,7 @@ Claudette runs as a [Claude Code hook](https://docs.anthropic.com/en/docs/claude
 
 ## CLI
 
-You can also search your knowledge base directly:
+Search your knowledge base directly:
 
 ```bash
 claudette search goroutine patterns     # search all entry types
@@ -45,6 +45,38 @@ claudette scan                          # rebuild the index
 ```
 
 **Flags:** `--format json`, `--threshold 3`, `--limit 10`
+
+## Session Analysis
+
+Claudette can also read Claude Code's own session transcripts — useful for reviewing what happened in a past conversation, extracting files touched, or spotting where things went sideways.
+
+```bash
+# Find session transcripts for the current project
+claudette sessions
+
+# Parse a transcript and show extracted turns
+claudette turns ~/.claude/projects/<encoded-path>/<uuid>/<uuid>.jsonl
+```
+
+```
+Turn 1  2026-04-18 11:42
+  User:    fix the goroutine race in internal/index/cache.go
+  Assist:  I'll read the file first and trace the lock usage…
+  Read:    internal/index/cache.go, internal/index/entry.go
+  Edited:  internal/index/cache.go
+  Tools:   Bash
+
+Turn 2  2026-04-18 11:49
+  User:    the test still fails
+  Assist:  The race is in the read path, not the write path…
+  Read:    internal/index/cache.go
+  Edited:  internal/index/cache.go
+  Tools:   Bash
+```
+
+Each turn shows the user prompt, the assistant's opening response, files read, files edited, and other tools used. The `--json` flag emits structured output for scripting. Parsing runs entirely offline — no network calls, never touches the hook path.
+
+See [Session Analysis](docs/session-analysis.md) for the full command reference.
 
 ## What gets indexed
 
@@ -85,7 +117,8 @@ Add extra directories to index team-wide skill repos or project-specific knowled
 
 - [Installation](docs/installation.md) — install, verify, uninstall, update
 - [How It Works](docs/how-it-works.md) — hook flow, index, scoring algorithm
-- [Searching](docs/searching.md) — CLI commands and flags
+- [Searching](docs/searching.md) — CLI search commands and flags
+- [Session Analysis](docs/session-analysis.md) — browse projects, sessions, and parsed turns
 - [Configuration](docs/configuration.md) — source directories, output modes, env vars
 - [Writing Entries](docs/writing-entries.md) — frontmatter, keyword weights, testing your entries
 - [Troubleshooting](docs/troubleshooting.md) — diagnostics, common errors, hook debugging

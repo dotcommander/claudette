@@ -118,6 +118,51 @@ Stop words removed → tokens: `["goroutine", "race", "condition"]`
 
 The third entry drops below the threshold (2) and is excluded from results.
 
+### Bigram Phrase Matching
+
+Adjacent tokens in the query form bigrams. If both tokens appear in an entry's keyword set, the bigram earns a bonus on top of the two individual matches.
+
+```
+# Query: "race condition"
+# Tokens: ["race", "condition"]
+# Bigram: "race condition"
+#
+# Entry has keywords: ["race", "condition", "goroutine"]
+# → individual hits: race +1, condition +1
+# → bigram match:    "race condition" +bonus
+# → total > entry that only matched "race" or "condition" alone
+```
+
+This means "race condition" scores higher against a race-condition KB entry than against an entry that merely mentions racing and conditions in unrelated contexts. Multi-word queries resolve more precisely without any configuration.
+
+### IDF Gating
+
+```
+# Index has 100 entries.
+# "error"   appears in 80 entries → frequency 80% → suppressed (above 50% gate)
+# "pgxpool" appears in  2 entries → frequency  2% → scores normally
+#
+# Query: "pgxpool error"
+# Only "pgxpool" contributes to the score — "error" is gated out.
+```
+
+Tokens that appear in more than 50% of indexed entries are suppressed entirely from scoring. They are too common to discriminate between entries and contribute noise rather than signal.
+
+Common terms like `file`, `command`, `error`, `the` earn zero score because they appear everywhere. Rare terms like `pgxpool`, `chi`, `errgroup` appear in few entries and carry their full IDF weight.
+
+You never need to configure a stop list. IDF gating adapts to your actual index: as your KB grows, terms that become universal automatically stop affecting scores.
+
+### Tokenizer: XML Tag and Path Stripping
+
+Before tokenizing any text, claudette removes XML-style tags and decomposes filesystem paths into their components.
+
+```
+Input:  "<related_skills_knowledge>internal/index/cache.go</related_skills_knowledge>"
+After:  ["internal", "index", "cache", "go"]
+```
+
+Without stripping, an import path like `internal/foo/bar` would produce a single token that never matches any entry keyword. With stripping, each path segment scores independently. Similarly, `<tag>` wrappers from hook output or prompt context don't inflate scores for entries that happen to share a path segment.
+
 ### Suppression Filters
 
 The hook applies three filters that the CLI does not — they prevent weak or noisy matches from cluttering Claude's context:
