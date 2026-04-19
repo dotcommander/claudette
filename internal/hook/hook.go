@@ -106,14 +106,21 @@ func Run() error { return runHook(userPromptSubmitMode) }
 // the tool response directly and surface matching KB entries.
 func RunPostToolUseFailure() error { return runHook(postToolFailureMode) }
 
-// runHook executes the shared hook pipeline for a given mode: read stdin,
-// decode via mode.extract, empty/slash checks, tokenize, score-and-respond.
-// Returns nil on all skip paths; returns err only on stdin read failure.
+// runHook is the production entry point bound to os.Stdin / os.Stdout.
 func runHook(m hookMode) error {
+	return runHookIO(os.Stdin, os.Stdout, m)
+}
+
+// runHookIO is the testable pipeline: reads input from r, writes response to w.
+// Keeps the entire 5-step pipeline (stdin → decode → extract → tokenize → score)
+// behind a single io.Reader/io.Writer seam so tests can exercise it without
+// swapping global file descriptors.
+// Returns nil on all skip paths; returns err only on stdin read failure.
+func runHookIO(r io.Reader, w io.Writer, m hookMode) error {
 	var status string
 	defer logStatus(m.statusPrefix, &status, time.Now())()
 
-	data, err := readStdin()
+	data, err := readAllLimited(r)
 	if err != nil {
 		status = "stdin error"
 		return err
@@ -139,15 +146,15 @@ func runHook(m hookMode) error {
 		return nil
 	}
 
-	return scoreAndRespond(tokens, m.event, &status)
+	return scoreAndRespondTo(w, tokens, m.event, &status)
 }
 
 // --- Shared pipeline ---
 
-// scoreAndRespond loads the index, scores tokens, and writes a hook response.
+// scoreAndRespondTo loads the index, scores tokens, and writes a hook response to w.
 // Sets status for the deferred logStatus call. Returns nil with empty status
 // when results are suppressed (no matches, low confidence).
-func scoreAndRespond(tokens []string, event string, status *string) error {
+func scoreAndRespondTo(w io.Writer, tokens []string, event string, status *string) error {
 	results, diagStatus := scoreTokens(tokens)
 	*status = diagStatus
 	if len(results) == 0 {
@@ -163,7 +170,7 @@ func scoreAndRespond(tokens []string, event string, status *string) error {
 			AdditionalContext: formatContext(results, outputMode(), cfg.ContextHeaderOrDefault()),
 		},
 	}
-	return json.NewEncoder(os.Stdout).Encode(resp)
+	return json.NewEncoder(w).Encode(resp)
 }
 
 // scoreTokens loads the index and scores tokens against it.
@@ -199,8 +206,9 @@ func scoreTokens(tokens []string) ([]search.ScoredEntry, string) {
 
 // --- Helpers ---
 
-func readStdin() ([]byte, error) {
-	return io.ReadAll(io.LimitReader(os.Stdin, maxStdinBytes))
+// readAllLimited reads from r up to maxStdinBytes to prevent unbounded memory use.
+func readAllLimited(r io.Reader) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(r, maxStdinBytes))
 }
 
 // anyToString converts an arbitrary JSON-decoded value to a string.

@@ -1,0 +1,7 @@
+{
+  "plugins": {
+    "tester": [
+      {"installPath": "__TMPDIR__/plugin-a"}
+    ]
+  }
+}
