@@ -10,7 +10,7 @@ func TestRun_EmptyTokens(t *testing.T) {
 	t.Parallel()
 	pr := Run(PipelineInput{
 		Tokens:    nil,
-		Entries:   baseEntries(),
+		Corpus:    NewCorpus(baseEntries(), nil, 0),
 		Threshold: DefaultThreshold,
 		Limit:     DefaultLimit,
 	})
@@ -43,7 +43,7 @@ func TestRun_NoGates_HighScore(t *testing.T) {
 	}
 	pr := Run(PipelineInput{
 		Tokens:     []string{"goroutine", "channel"},
-		Entries:    entries,
+		Corpus:     NewCorpus(entries, nil, 0),
 		Threshold:  1,
 		Limit:      0,
 		ApplyGates: false,
@@ -66,7 +66,7 @@ func TestRun_Gates_HighConfidence_PassThrough(t *testing.T) {
 	}
 	pr := Run(PipelineInput{
 		Tokens:     []string{"goroutine", "channel"},
-		Entries:    entries,
+		Corpus:     NewCorpus(entries, nil, 0),
 		Threshold:  1,
 		Limit:      0,
 		ApplyGates: true,
@@ -88,7 +88,7 @@ func TestRun_Gates_LowConfidence(t *testing.T) {
 	}
 	pr := Run(PipelineInput{
 		Tokens:     []string{"pipe", "tok"},
-		Entries:    entries,
+		Corpus:     NewCorpus(entries, nil, 0),
 		Threshold:  1,
 		Limit:      0,
 		ApplyGates: true,
@@ -150,7 +150,7 @@ func TestRun_Limit_Zero_NoCap(t *testing.T) {
 	}
 	pr := Run(PipelineInput{
 		Tokens:     []string{"pipe"},
-		Entries:    entries,
+		Corpus:     NewCorpus(entries, nil, 0),
 		Threshold:  1,
 		Limit:      0,
 		ApplyGates: false,
@@ -172,7 +172,7 @@ func TestRun_Limit_Capping(t *testing.T) {
 	}
 	pr := Run(PipelineInput{
 		Tokens:     []string{"pipe"},
-		Entries:    entries,
+		Corpus:     NewCorpus(entries, nil, 0),
 		Threshold:  1,
 		Limit:      3,
 		ApplyGates: false,
@@ -188,19 +188,23 @@ func TestRun_ScoredMatchesScore(t *testing.T) {
 	t.Parallel()
 
 	corpora := []struct {
-		name    string
+		name   string
+		corpus Corpus
+		tokens []string
+		// raw entries + stats kept for the direct Score() call comparison
 		entries []index.Entry
-		tokens  []string
 		idf     map[string]float64
 		avgdl   float64
 	}{
 		{
 			name:    "base entries channel no idf",
+			corpus:  NewCorpus(baseEntries(), nil, 0),
 			entries: baseEntries(),
 			tokens:  []string{"channel"},
 		},
 		{
 			name:    "base entries concurrency idf",
+			corpus:  NewInMemoryCorpus(baseEntries()...),
 			entries: baseEntries(),
 			tokens:  []string{"concurrency"},
 			idf:     index.ComputeIDF(baseEntries()),
@@ -208,6 +212,13 @@ func TestRun_ScoredMatchesScore(t *testing.T) {
 		},
 		{
 			name: "bigram match",
+			corpus: NewCorpus([]index.Entry{
+				makeEntry("race-entry", "Race Condition Detection", "misc",
+					map[string]int{"race": 1, "condition": 1},
+					[]string{"race condition"}),
+				makeEntry("other", "Other Entry", "misc",
+					map[string]int{"pipe": 1}, nil),
+			}, nil, 0),
 			entries: []index.Entry{
 				makeEntry("race-entry", "Race Condition Detection", "misc",
 					map[string]int{"race": 1, "condition": 1},
@@ -219,6 +230,7 @@ func TestRun_ScoredMatchesScore(t *testing.T) {
 		},
 		{
 			name:    "alias match golang to go",
+			corpus:  NewCorpus(baseEntries(), nil, 0),
 			entries: baseEntries(),
 			tokens:  []string{"golang"},
 		},
@@ -231,13 +243,11 @@ func TestRun_ScoredMatchesScore(t *testing.T) {
 
 			scoreResults := Score(c.entries, c.tokens, DefaultThreshold, c.idf, c.avgdl)
 			pr := Run(PipelineInput{
-				Tokens:      c.tokens,
-				Entries:     c.entries,
-				IDF:         c.idf,
-				AvgFieldLen: c.avgdl,
-				Threshold:   DefaultThreshold,
-				Limit:       0,
-				ApplyGates:  false,
+				Tokens:     c.tokens,
+				Corpus:     c.corpus,
+				Threshold:  DefaultThreshold,
+				Limit:      0,
+				ApplyGates: false,
 			})
 
 			if len(pr.Scored) != len(scoreResults) {

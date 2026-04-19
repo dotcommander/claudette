@@ -202,13 +202,11 @@ func scoreTokens(tokens []string) scoreResult {
 	}
 
 	pr := search.Run(search.PipelineInput{
-		Tokens:      tokens,
-		Entries:     idx.Entries,
-		IDF:         idx.IDF,
-		AvgFieldLen: idx.AvgFieldLen,
-		Threshold:   search.DefaultThreshold,
-		Limit:       search.DefaultLimit,
-		ApplyGates:  true,
+		Tokens:     tokens,
+		Corpus:     search.CorpusFromIndex(&idx),
+		Threshold:  search.DefaultThreshold,
+		Limit:      search.DefaultLimit,
+		ApplyGates: true,
 	})
 
 	if len(pr.AboveThreshold) == 0 {

@@ -43,24 +43,24 @@ func Search(w io.Writer, prompt, filter string, opts SearchOpts) error {
 		return err
 	}
 
-	entries := idx.Entries
+	var corpus search.Corpus = search.CorpusFromIndex(&idx)
 	if filter != "" {
 		t, ok := opts.FilterTypes[filter]
 		if !ok {
 			return fmt.Errorf("unknown filter type: %q", filter)
 		}
-		entries = search.FilterByType(entries, t)
+		// Preserve parent-corpus IDF and AvgFieldLen: filtering entries must not
+		// change term weights — scores must be comparable across filter runs.
+		corpus = search.NewCorpus(search.FilterByType(idx.Entries, t), idx.IDF, idx.AvgFieldLen)
 	}
 
 	tokens := search.Tokenize(prompt, search.DefaultStopWords())
 	pr := search.Run(search.PipelineInput{
-		Tokens:      tokens,
-		Entries:     entries,
-		IDF:         idx.IDF,
-		AvgFieldLen: idx.AvgFieldLen,
-		Threshold:   opts.Threshold,
-		Limit:       opts.Limit,
-		ApplyGates:  false,
+		Tokens:     tokens,
+		Corpus:     corpus,
+		Threshold:  opts.Threshold,
+		Limit:      opts.Limit,
+		ApplyGates: false,
 	})
 
 	format := opts.Format

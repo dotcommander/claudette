@@ -47,13 +47,11 @@ func Explain(w io.Writer, prompt string, opts ExplainOpts) error {
 	tokens := search.Tokenize(prompt, stopWords)
 
 	pr := search.Run(search.PipelineInput{
-		Tokens:      tokens,
-		Entries:     idx.Entries,
-		IDF:         idx.IDF,
-		AvgFieldLen: idx.AvgFieldLen,
-		Threshold:   search.DefaultThreshold,
-		Limit:       0,
-		ApplyGates:  true,
+		Tokens:     tokens,
+		Corpus:     search.CorpusFromIndex(&idx),
+		Threshold:  search.DefaultThreshold,
+		Limit:      0,
+		ApplyGates: true,
 	})
 
 	limit := opts.Limit
