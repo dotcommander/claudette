@@ -50,8 +50,6 @@ func fastPath(cmd string) (bool, error) {
 }
 
 func rootCmd() *cobra.Command {
-	opts := actions.NewSearchOpts()
-
 	root := &cobra.Command{
 		Use:     "claudette",
 		Short:   "Knowledge and skill discovery for Claude Code",
@@ -60,15 +58,10 @@ func rootCmd() *cobra.Command {
 	// Cobra auto-registers --version when Version is set; keep output terse.
 	root.SetVersionTemplate("{{.Version}}\n")
 
-	root.PersistentFlags().StringVar(&opts.Format, "format", opts.Format, "Output format: text or json")
-	root.PersistentFlags().BoolVar(&opts.JSON, "json", false, "Output as JSON (shorthand for --format json; takes precedence)")
-	root.PersistentFlags().IntVar(&opts.Threshold, "threshold", opts.Threshold, "Minimum score to include in results")
-	root.PersistentFlags().IntVar(&opts.Limit, "limit", opts.Limit, "Maximum number of results")
-
 	root.AddCommand(
-		newSearchCmd(&opts, "", os.Stdin),
-		newSearchCmd(&opts, "kb", os.Stdin),
-		newSearchCmd(&opts, "skill", os.Stdin),
+		newSearchCmd("", os.Stdin),
+		newSearchCmd("kb", os.Stdin),
+		newSearchCmd("skill", os.Stdin),
 		scanCmd(),
 		installCmd(),
 		uninstallCmd(),
@@ -81,7 +74,7 @@ func rootCmd() *cobra.Command {
 	return root
 }
 
-func newSearchCmd(opts *actions.SearchOpts, filter string, stdin io.Reader) *cobra.Command {
+func newSearchCmd(filter string, stdin io.Reader) *cobra.Command {
 	use := "search"
 	short := "Search all entries (KB, skills, agents, commands)"
 	if filter != "" {
@@ -89,7 +82,8 @@ func newSearchCmd(opts *actions.SearchOpts, filter string, stdin io.Reader) *cob
 		short = fmt.Sprintf("Search %s entries only", filter)
 	}
 
-	return &cobra.Command{
+	opts := actions.NewSearchOpts()
+	cmd := &cobra.Command{
 		Use:   use + " [prompt...]",
 		Short: short,
 		Args:  cobra.MinimumNArgs(1),
@@ -98,9 +92,14 @@ func newSearchCmd(opts *actions.SearchOpts, filter string, stdin io.Reader) *cob
 			if err != nil {
 				return err
 			}
-			return actions.Search(os.Stdout, prompt, filter, *opts)
+			return actions.Search(os.Stdout, prompt, filter, opts)
 		},
 	}
+	cmd.Flags().StringVar(&opts.Format, "format", opts.Format, "Output format: text or json")
+	cmd.Flags().BoolVar(&opts.JSON, "json", false, "Output as JSON (shorthand for --format json; takes precedence)")
+	cmd.Flags().IntVar(&opts.Threshold, "threshold", opts.Threshold, "Minimum score to include in results")
+	cmd.Flags().IntVar(&opts.Limit, "limit", opts.Limit, "Maximum number of results")
+	return cmd
 }
 
 // resolvePrompt returns the search prompt from args or stdin.
