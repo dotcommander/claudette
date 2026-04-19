@@ -11,6 +11,8 @@ go build -o claudette ./cmd/claudette/
 go install ./cmd/claudette/
 go test ./...
 go test ./internal/search/ -run TestScorer   # single package/test
+claudette update --check                      # check for newer release
+claudette update                              # self-update via `go install @latest`
 ```
 
 ## Architecture
@@ -71,6 +73,8 @@ Claudette runs on every prompt in the hook hot path. Any remote call — LLM API
 - **No remote data fetching.** No fetching skill/agent/command definitions from registries, GitHub, or plugin APIs. All data comes from local filesystem paths discovered at runtime.
 - **Offline enrichment only.** If future features need AI-generated summaries or semantic clustering, they run as a separate background CLI command (e.g., `claudette enrich`), not in the hook. The hook always reads pre-computed local data.
 - Adding an LLM or HTTP dependency to `go.mod` requires an explicit exception with a latency budget justification.
+
+**Exception — `claudette update` command only.** User-invoked self-update may call `api.github.com/repos/dotcommander/claudette/releases/latest` (for `--check`) and exec `go install ...@latest` (for apply). Scoped strictly to `internal/actions/update.go`; the hook, search, scan, and index code paths remain network-free. Enforced by `grep -RE "net/http|os/exec" internal/{hook,search,index,config,settings}` returning zero matches.
 
 ## Conventions
 
