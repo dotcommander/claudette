@@ -12,6 +12,10 @@ type Frontmatter struct {
 	Description string   `yaml:"description"`
 	Tags        []string `yaml:"tags"`
 	Aliases     []string `yaml:"aliases"`
+	// Provenance fields (optional; KB entries only, ignored for non-KB).
+	Source     string `yaml:"source"`
+	SourceTask string `yaml:"source_task"`
+	SourceFile string `yaml:"source_file"`
 }
 
 var fmDelimiter = []byte("---\n")

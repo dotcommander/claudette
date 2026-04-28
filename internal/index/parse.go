@@ -65,6 +65,7 @@ func parseEntry(path, sourceDir string, mtime time.Time) (Entry, bool) {
 		FileMtime: mtime,
 		Keywords:  keywords,
 		Bigrams:   extractBigrams(title),
+		Source:    cmp.Or(fm.SourceFile, fm.SourceTask, fm.Source),
 	}, true
 }
 

@@ -268,6 +268,9 @@ func formatContext(results []search.ScoredEntry, mode, header string) string {
 		if len(r.Matched) > 0 {
 			fmt.Fprintf(&b, " [matched: %s]", strings.Join(r.Matched, ", "))
 		}
+		if r.Entry.Source != "" {
+			fmt.Fprintf(&b, " (source: %s)", r.Entry.Source)
+		}
 	}
 	b.WriteByte('\n')
 	b.WriteString(contextCloseTag)

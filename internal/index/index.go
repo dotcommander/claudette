@@ -13,7 +13,7 @@ import (
 )
 
 // CurrentVersion is the index schema version; bump when Entry shape changes.
-const CurrentVersion = 9
+const CurrentVersion = 10
 
 // Index is the on-disk cache of all scanned entries.
 type Index struct {

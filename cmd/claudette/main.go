@@ -72,6 +72,7 @@ func rootCmd() *cobra.Command {
 		projectsCmd(),
 		sessionsCmd(),
 		turnsCmd(),
+		codifyCmd(),
 	)
 
 	return root

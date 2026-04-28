@@ -26,4 +26,5 @@ type Entry struct {
 	HitCount         int            `json:"hit_count,omitzero"`          // raw aggregated usage count (diagnostics only)
 	HitCountDecayed  float64        `json:"hit_count_decayed,omitempty"` // exponentially-decayed hit count (scorer uses this)
 	SuggestedAliases []string       `json:"suggested_aliases,omitempty"` // co-occurrence-derived alias candidates (populated at rebuild; scored at weight 1)
+	Source           string         `json:"source,omitzero"`             // provenance: collapsed from frontmatter source_file > source_task > source
 }
